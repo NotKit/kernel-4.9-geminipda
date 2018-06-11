@@ -170,6 +170,21 @@ static const u32 mt6397_regs[] = {
 	[PWRAP_DEW_CIPHER_SWRST] =	0xbc24,
 };
 
+static const u32 mt6351_regs[] = {
+	[PWRAP_DEW_DIO_EN] =		0x02F2,
+	[PWRAP_DEW_READ_TEST] =		0x02F4,
+	[PWRAP_DEW_WRITE_TEST] =	0x02F6,
+	[PWRAP_DEW_CRC_EN] =		0x02FA,
+	[PWRAP_DEW_CRC_VAL] =		0x02FC,
+	[PWRAP_DEW_CIPHER_KEY_SEL] =	0x0300,
+	[PWRAP_DEW_CIPHER_IV_SEL] =	0x0302,
+	[PWRAP_DEW_CIPHER_EN] =		0x0304,
+	[PWRAP_DEW_CIPHER_RDY] =	0x0306,
+	[PWRAP_DEW_CIPHER_MODE] =	0x0308,
+	[PWRAP_DEW_CIPHER_SWRST] =	0x030A,
+	[PWRAP_DEW_RDDMY_NO] =		0x030C,
+};
+
 static const u32 mt6358_regs[] = {
 	[PWRAP_DEW_RG_EN_RECORD] =	0x040a,
 	[PWRAP_DEW_DIO_EN] =		0x040c,
@@ -834,6 +849,7 @@ static int mt8163_regs[] = {
 
 enum pmic_type {
 	PMIC_MT6323,
+	PMIC_MT6351,
 	PMIC_MT6358,
 	PMIC_MT6397,
 };
@@ -1496,6 +1512,7 @@ static int pwrap_init_cipher(struct pmic_wrapper *wrp)
 			    0x1);
 		break;
 	case PMIC_MT6323:
+	case PMIC_MT6351:
 	case PMIC_MT6358:
 		pwrap_write(wrp, wrp->slave->dew_regs[PWRAP_DEW_CIPHER_EN],
 			    0x1);
@@ -1860,6 +1877,15 @@ static const struct pwrap_slv_type pmic_mt6358 = {
 	.pwrap_write = pwrap_write16,
 };
 
+static const struct pwrap_slv_type pmic_mt6351 = {
+	.dew_regs = mt6351_regs,
+	.type = PMIC_MT6351,
+	.regmap = &pwrap_regmap_config16,
+	.caps = 0,
+	.pwrap_read = pwrap_read16,
+	.pwrap_write = pwrap_write16,
+};
+
 static const struct of_device_id of_slave_match_tbl[] = {
 	{
 		.compatible = "mediatek,mt6323",
@@ -1867,6 +1893,9 @@ static const struct of_device_id of_slave_match_tbl[] = {
 	}, {
 		.compatible = "mediatek,mt6397",
 		.data = &pmic_mt6397,
+	}, {
+		.compatible = "mediatek,mt6351",
+		.data = &pmic_mt6351,
 	}, {
 		.compatible = "mediatek,mt_pmic",
 		.data = &pmic_mt6358,
