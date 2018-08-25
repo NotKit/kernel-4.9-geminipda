@@ -77,9 +77,10 @@ enum clk_id {
 	CLK_VENC,
 	CLK_VENC_LT,
 	CLK_ETHIF,
-    CLK_VDEC,
+	CLK_VDEC,
 	CLK_JPGDEC,
 	CLK_AUDIO,
+	CLK_MJC,
 	CLK_MAX,
 };
 
@@ -93,6 +94,7 @@ static const char * const clk_names[] = {
     "vdec",
 	"jpgdec",
 	"audio",
+	"mjc",
 	NULL,
 };
 
@@ -739,7 +741,7 @@ static const struct scp_domain_data scp_domain_data_mt6797[] = {
 		.ctl_offs = 0x300,
 		.sram_pdn_bits = GENMASK(8, 8),
 		.sram_pdn_ack_bits = GENMASK(12, 12),
-		.clk_id = {CLK_VDEC},
+		.clk_id = {CLK_MM, CLK_VDEC},
 	},
 	[MT6797_POWER_DOMAIN_VENC] = {
 		.name = "venc",
@@ -747,7 +749,7 @@ static const struct scp_domain_data scp_domain_data_mt6797[] = {
 		.ctl_offs = 0x304,
 		.sram_pdn_bits = GENMASK(11, 8),
 		.sram_pdn_ack_bits = GENMASK(15, 12),
-		.clk_id = {CLK_NONE},
+		.clk_id = {CLK_MM, CLK_VENC},
 	},
 	[MT6797_POWER_DOMAIN_ISP] = {
 		.name = "isp",
@@ -755,7 +757,7 @@ static const struct scp_domain_data scp_domain_data_mt6797[] = {
 		.ctl_offs = 0x308,
 		.sram_pdn_bits = GENMASK(9, 8),
 		.sram_pdn_ack_bits = GENMASK(13, 12),
-		.clk_id = {CLK_NONE},
+		.clk_id = {CLK_MM},
 	},
 	[MT6797_POWER_DOMAIN_MM] = {
 		.name = "mm",
@@ -772,7 +774,7 @@ static const struct scp_domain_data scp_domain_data_mt6797[] = {
 		.ctl_offs = 0x314,
 		.sram_pdn_bits = GENMASK(11, 8),
 		.sram_pdn_ack_bits = GENMASK(15, 12),
-		.clk_id = {CLK_NONE},
+		.clk_id = {CLK_AUDIO},
 	},
 	[MT6797_POWER_DOMAIN_MFG_ASYNC] = {
 		.name = "mfg_async",
@@ -788,7 +790,7 @@ static const struct scp_domain_data scp_domain_data_mt6797[] = {
 		.ctl_offs = 0x310,
 		.sram_pdn_bits = GENMASK(8, 8),
 		.sram_pdn_ack_bits = GENMASK(12, 12),
-		.clk_id = {CLK_NONE},
+		.clk_id = {CLK_MJC},
 	},
 };
 
