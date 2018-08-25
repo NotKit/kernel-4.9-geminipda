@@ -141,10 +141,13 @@
 		compatible = "mediatek,mt6797-scpsys";
 		#power-domain-cells = <1>;
 		reg = <0 0x10006000 0 0x1000>;
-		clocks = <&topckgen CLK_TOP_MUX_MFG>,
+		clocks = <&infrasys CLK_INFRA_AUDIO_26M>,
+			 <&topckgen CLK_TOP_MUX_MFG>,
+			 <&topckgen CLK_TOP_MUX_MJC>,
 			 <&topckgen CLK_TOP_MUX_MM>,
-			 <&topckgen CLK_TOP_MUX_VDEC>;
-		clock-names = "mfg", "mm", "vdec";
+			 <&topckgen CLK_TOP_MUX_VDEC>,
+			 <&topckgen CLK_TOP_MUX_VENC>;
+		clock-names = "audio", "mfg", "mjc", "mm", "vdec", "venc";
 		infracfg = <&infrasys>;
 	};
 
