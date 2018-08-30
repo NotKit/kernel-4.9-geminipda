@@ -440,6 +440,9 @@ static struct scp *init_scp(struct platform_device *pdev,
 		struct scp_domain *scpd = &scp->domains[i];
 		const struct scp_domain_data *data = &scp_domain_data[i];
 
+		if (!data->name)
+			continue;
+
 		scpd->supply = devm_regulator_get_optional(&pdev->dev,
 					data->name);
 		if (IS_ERR(scpd->supply)) {
@@ -458,6 +461,9 @@ static struct scp *init_scp(struct platform_device *pdev,
 		struct scp_domain *scpd = &scp->domains[i];
 		struct generic_pm_domain *genpd = &scpd->genpd;
 		const struct scp_domain_data *data = &scp_domain_data[i];
+
+		if (!data->name)
+			continue;
 
 		pd_data->domains[i] = genpd;
 		scpd->scp = scp;
@@ -494,6 +500,9 @@ static void mtk_register_power_domains(struct platform_device *pdev,
 	for (i = 0; i < num; i++) {
 		struct scp_domain *scpd = &scp->domains[i];
 		struct generic_pm_domain *genpd = &scpd->genpd;
+
+		if (!genpd->name)
+			continue;
 
 		/*
 		 * Initially turn on all domains to make the domains usable
