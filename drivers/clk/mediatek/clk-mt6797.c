@@ -604,6 +604,8 @@ static int mtk_infrasys_init(struct platform_device *pdev)
 	if (r)
 		return r;
 
+	mtk_register_reset_controller(node, 3, 0x120);
+
 	return 0;
 }
 
