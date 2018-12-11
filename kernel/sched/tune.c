@@ -11,11 +11,23 @@
 #include "sched.h"
 #include "tune.h"
 
+#define MET_STUNE_DEBUG 1
+
+#if MET_STUNE_DEBUG
+#include <mt-plat/met_drv.h>
+#endif
+
 #ifdef CONFIG_CGROUP_SCHEDTUNE
 bool schedtune_initialized = false;
 #endif
 
 unsigned int sysctl_sched_cfs_boost __read_mostly;
+
+static int default_stune_threshold;
+bool global_negative_flag;
+
+static struct target_cap schedtune_target_cap[16];
+static int cpu_cluster_nr;
 
 extern struct reciprocal_value schedtune_spc_rdiv;
 struct target_nrg schedtune_target_nrg;
@@ -188,6 +200,9 @@ struct schedtune {
 	/* Hint to bias scheduling of tasks on that SchedTune CGroup
 	 * towards idle CPUs */
 	int prefer_idle;
+
+	/* Add capacity_min for task floor setting */
+	int capacity_min;
 };
 
 static inline struct schedtune *css_st(struct cgroup_subsys_state *css)
@@ -220,6 +235,7 @@ root_schedtune = {
 	.perf_boost_idx = 0,
 	.perf_constrain_idx = 0,
 	.prefer_idle = 0,
+	.capacity_min = 0,
 };
 
 int
@@ -264,7 +280,11 @@ schedtune_accept_deltas(int nrg_delta, int cap_delta,
  *    implementation especially for the computation of the per-CPU boost
  *    value
  */
+#ifdef CONFIG_MTK_IO_BOOST
+#define BOOSTGROUPS_COUNT 6
+#else
 #define BOOSTGROUPS_COUNT 5
+#endif
 
 /* Array of configured boostgroups */
 static struct schedtune *allocated_group[BOOSTGROUPS_COUNT] = {
@@ -283,6 +303,11 @@ static struct schedtune *allocated_group[BOOSTGROUPS_COUNT] = {
 struct boost_groups {
 	/* Maximum boost value for all RUNNABLE tasks on a CPU */
 	int boost_max;
+	/*
+	 * Maximum capacity_min for all RUNNABLE tasks on a CPU,
+	 * to fix floor capacity of CPU.
+	 */
+	int max_capacity_min;
 	struct {
 		/* True when this boost group maps an actual cgroup */
 		bool valid;
@@ -290,6 +315,8 @@ struct boost_groups {
 		int boost;
 		/* Count of RUNNABLE tasks on that boost group */
 		unsigned tasks;
+		/* The capacity_min for tasks on that boost group */
+		int capacity_min;
 	} group[BOOSTGROUPS_COUNT];
 	/* CPU's boost group locking */
 	raw_spinlock_t lock;
@@ -304,11 +331,13 @@ schedtune_cpu_update(int cpu)
 	struct boost_groups *bg;
 	int boost_max;
 	int idx;
+	int max_capacity_min;
 
 	bg = &per_cpu(cpu_boost_groups, cpu);
 
 	/* The root boost group is always active */
 	boost_max = bg->group[0].boost;
+	max_capacity_min = bg->group[0].capacity_min;
 	for (idx = 1; idx < BOOSTGROUPS_COUNT; ++idx) {
 
 		/* Ignore non boostgroups not mapping a cgroup */
@@ -323,13 +352,27 @@ schedtune_cpu_update(int cpu)
 			continue;
 
 		boost_max = max(boost_max, bg->group[idx].boost);
+		max_capacity_min =
+			max(max_capacity_min, bg->group[idx].capacity_min);
 	}
 
 	/* Ensures boost_max is non-negative when all cgroup boost values
 	 * are neagtive. Avoids under-accounting of cpu capacity which may cause
 	 * task stacking and frequency spikes.*/
-	boost_max = max(boost_max, 0);
+	/*
+	 * mtk:
+	 * If original path, max(boost_max, 0)
+	 * If use mtk perfservice kernel API to update negative boost,
+	 * when all group are neagtive, boost_max should lower than 0
+	 * and it can decrease frequency.
+	 */
+	if (!global_negative_flag) {
+		boost_max = max(boost_max, 0);
+		max_capacity_min = max(max_capacity_min, 0);
+	}
+
 	bg->boost_max = boost_max;
+	bg->max_capacity_min = max_capacity_min;
 }
 
 static int
@@ -378,6 +421,45 @@ schedtune_boostgroup_update(int idx, int boost)
 	return 0;
 }
 
+static int
+schedtune_boostgroup_update_capacity_min(int idx, int capacity_min)
+{
+	struct boost_groups *bg;
+	int cur_max_capacity_min;
+	int old_capacity_min;
+	int cpu;
+
+	/* Update per CPU boost groups */
+	for_each_possible_cpu(cpu) {
+		bg = &per_cpu(cpu_boost_groups, cpu);
+
+		/*
+		 * Keep track of current boost values to compute the per CPU
+		 * maximum only when it has been affected by the new value of
+		 * the updated boost group
+		 */
+		cur_max_capacity_min = bg->max_capacity_min;
+		old_capacity_min = bg->group[idx].capacity_min;
+		/* Update the boost value of this boost group */
+		bg->group[idx].capacity_min = capacity_min;
+		/* Check if this update increase current max */
+		if (capacity_min > cur_max_capacity_min &&
+			bg->group[idx].tasks) {
+			bg->max_capacity_min = capacity_min;
+			continue;
+		}
+		/* Check if this update has decreased current max */
+		if (cur_max_capacity_min == old_capacity_min &&
+			old_capacity_min > capacity_min) {
+			schedtune_cpu_update(cpu);
+			continue;
+		}
+	}
+	return 0;
+}
+
+#include "tune_plus.c"
+
 #define ENQUEUE_TASK  1
 #define DEQUEUE_TASK -1
 
@@ -391,7 +473,8 @@ schedtune_tasks_update(struct task_struct *p, int cpu, int idx, int task_count)
 	bg->group[idx].tasks = max(0, tasks);
 
 	trace_sched_tune_tasks_update(p, cpu, tasks, idx,
-			bg->group[idx].boost, bg->boost_max);
+			bg->group[idx].boost, bg->boost_max,
+			bg->group[idx].capacity_min, bg->max_capacity_min);
 
 	/* Boost group activation or deactivation on that RQ */
 	if (tasks == 1 || tasks == 0)
@@ -607,6 +690,31 @@ int schedtune_task_boost(struct task_struct *p)
 	return task_boost;
 }
 
+int schedtune_cpu_capacity_min(int cpu)
+{
+	struct boost_groups *bg;
+
+	bg = &per_cpu(cpu_boost_groups, cpu);
+	return bg->max_capacity_min;
+}
+
+int schedtune_task_capacity_min(struct task_struct *p)
+{
+	struct schedtune *st;
+	int task_capacity_min;
+
+	if (!unlikely(schedtune_initialized))
+		return 0;
+
+	/* Get task boost value */
+	rcu_read_lock();
+	st = task_schedtune(p);
+	task_capacity_min = st->capacity_min;
+	rcu_read_unlock();
+
+	return task_capacity_min;
+}
+
 int schedtune_prefer_idle(struct task_struct *p)
 {
 	struct schedtune *st;
@@ -639,6 +747,52 @@ prefer_idle_write(struct cgroup_subsys_state *css, struct cftype *cft,
 	struct schedtune *st = css_st(css);
 	st->prefer_idle = prefer_idle;
 
+#if MET_STUNE_DEBUG
+	/* top-app */
+	if (st->idx == 3)
+		met_tag_oneshot(0, "sched_user_top_prefer_idle",
+				st->prefer_idle);
+#endif
+
+	return 0;
+}
+
+static u64
+capacity_min_read(struct cgroup_subsys_state *css, struct cftype *cft)
+{
+	struct schedtune *st = css_st(css);
+
+	return st->capacity_min;
+}
+
+static int
+capacity_min_write(struct cgroup_subsys_state *css, struct cftype *cft,
+		u64 capacity_min)
+{
+	struct schedtune *st = css_st(css);
+
+	if (capacity_min < 0 || capacity_min > 1024) {
+		printk_deferred("warning: capacity_min should be 0~1024\n");
+		return -EINVAL;
+	}
+
+#ifdef CONFIG_CPU_FREQ_GOV_SCHEDPLUS
+	set_cap_min_freq(capacity_min);
+#endif
+
+	rcu_read_lock();
+	st->capacity_min = capacity_min;
+	/* Update CPU capacity_min */
+	schedtune_boostgroup_update_capacity_min(st->idx, st->capacity_min);
+	rcu_read_unlock();
+
+#if MET_STUNE_DEBUG
+	/* top-app */
+	if (st->idx == 3)
+		met_tag_oneshot(0, "sched_boost_user_top_capacity_min",
+				st->capacity_min);
+#endif
+
 	return 0;
 }
 
@@ -657,9 +811,135 @@ boost_write(struct cgroup_subsys_state *css, struct cftype *cft,
 	struct schedtune *st = css_st(css);
 	unsigned threshold_idx;
 	int boost_pct;
+	bool dvfs_on_demand = false;
+	int ctl_no = div64_s64(boost, 1000);
+	int cluster;
+#ifdef CONFIG_CPU_FREQ_GOV_SCHEDPLUS
+	int floor = 0;
+	int c0, c1, i;
+#endif
+	int cap_min = 0;
 
-	if (boost < -100 || boost > 100)
+	switch (ctl_no) {
+	case 4:
+		/* min cpu capacity request */
+		boost -= ctl_no * 1000;
+
+		/* update capacity_min */
+		if (boost < 0 || boost > 100) {
+			printk_deferred("warning: boost for capacity_min should be 0~100\n");
+			if (boost > 100)
+				boost = 100;
+			else if (boost < 0)
+				boost = 0;
+		}
+		cap_min = div64_s64(boost * 1024, 100);
+
+#ifdef CONFIG_CPU_FREQ_GOV_SCHEDPLUS
+		set_cap_min_freq(cap_min);
+#endif
+		rcu_read_lock();
+		st->capacity_min = cap_min;
+		/* Update CPU capacity_min */
+		schedtune_boostgroup_update_capacity_min(
+					st->idx, st->capacity_min);
+		rcu_read_unlock();
+
+#if MET_STUNE_DEBUG
+		/* top-app */
+		if (st->idx == 3)
+			met_tag_oneshot(0, "sched_boost_user_top_capacity_min",
+					st->capacity_min);
+#endif
+
+		/* boost4xxx: no boost only capacity_min */
+		boost = 0;
+
+		stune_task_threshold = default_stune_threshold;
+		break;
+	case 3:
+		/* a floor of cpu frequency */
+		boost -= ctl_no * 1000;
+		cluster = (int)boost / 100;
+		boost = (int)boost % 100;
+#ifdef CONFIG_CPU_FREQ_GOV_SCHEDPLUS
+		if (cluster > 0 && cluster <= 0x2) { /* only two cluster */
+			floor = 1;
+			c0 = cluster & 0x1;
+			c1 = cluster & 0x2;
+
+			/* cluster 0 */
+			if (c0)
+				set_min_boost_freq(boost, 0);
+			else
+				min_boost_freq[0] = 0;
+
+			/* cluster 1 */
+			if (c1)
+				set_min_boost_freq(boost, 1);
+			else
+				min_boost_freq[1] = 0;
+		}
+#endif
+		stune_task_threshold = default_stune_threshold;
+		break;
+	case 2:
+		/* dvfs short cut */
+		boost -= 2000;
+		stune_task_threshold = default_stune_threshold;
+		dvfs_on_demand = true;
+		break;
+	case 1:
+		/* boost all tasks */
+		boost -= 1000;
+		stune_task_threshold = 0;
+		break;
+	case 0:
+		/* boost big tasks only */
+		stune_task_threshold = default_stune_threshold;
+		break;
+	default:
+		printk_deferred("warning: perf ctrl no should be 0~1\n");
 		return -EINVAL;
+	}
+
+	if (boost < -100 || boost > 100) {
+		printk_deferred("warning: perf boost value should be -100~100\n");
+		return -EINVAL;
+	}
+
+#ifdef CONFIG_CPU_FREQ_GOV_SCHEDPLUS
+	for (i = 0; i < cpu_cluster_nr; i++) {
+		if (!floor)
+			min_boost_freq[i] = 0;
+		if (!cap_min)
+			cap_min_freq[i] = 0;
+#if MET_STUNE_DEBUG
+		met_tag_oneshot(0, met_dvfs_info2[i], min_boost_freq[i]);
+		met_tag_oneshot(0, met_dvfs_info3[i], cap_min_freq[i]);
+#endif
+	}
+#endif /* CONFIG_CPU_FREQ_GOV_SCHEDPLUS */
+
+	if (!cap_min) {
+		rcu_read_lock();
+		st->capacity_min = 0;
+
+		/* Update CPU capacity_min */
+		schedtune_boostgroup_update_capacity_min(
+				st->idx, st->capacity_min);
+		rcu_read_unlock();
+
+#if MET_STUNE_DEBUG
+		/* top-app */
+		if (st->idx == 3)
+			met_tag_oneshot(0, "sched_boost_user_top_capacity_min",
+					st->capacity_min);
+#endif
+	}
+
+	global_negative_flag = false;
+
 	boost_pct = boost;
 
 	/*
@@ -673,6 +953,9 @@ boost_write(struct cgroup_subsys_state *css, struct cftype *cft,
 	st->perf_constrain_idx = threshold_idx;
 
 	st->boost = boost;
+
+	sys_boosted = boost;
+
 	if (css == &root_schedtune.css) {
 		sysctl_sched_cfs_boost = boost;
 		perf_boost_idx  = threshold_idx;
@@ -682,7 +965,21 @@ boost_write(struct cgroup_subsys_state *css, struct cftype *cft,
 	/* Update CPU boost */
 	schedtune_boostgroup_update(st->idx, st->boost);
 
+#ifdef CONFIG_CPU_FREQ_GOV_SCHEDPLUS
+	if (dvfs_on_demand)
+		update_freq_fastpath();
+#endif
+
 	trace_sched_tune_config(st->boost);
+
+#if MET_STUNE_DEBUG
+	/* user: foreground */
+	if (st->idx == 1)
+		met_tag_oneshot(0, "sched_boost_user_fg", st->boost);
+	/* user: top-app */
+	if (st->idx == 3)
+		met_tag_oneshot(0, "sched_boost_user_top", st->boost);
+#endif
 
 	return 0;
 }
@@ -697,6 +994,11 @@ static struct cftype files[] = {
 		.name = "prefer_idle",
 		.read_u64 = prefer_idle_read,
 		.write_u64 = prefer_idle_write,
+	},
+	{
+		.name = "capacity_min",
+		.read_u64 = capacity_min_read,
+		.write_u64 = capacity_min_write,
 	},
 	{ }	/* terminate */
 };
@@ -768,6 +1070,7 @@ schedtune_boostgroup_release(struct schedtune *st)
 		bg = &per_cpu(cpu_boost_groups, cpu);
 		bg->group[st->idx].valid = false;
 		bg->group[st->idx].boost = 0;
+		bg->group[st->idx].capacity_min = 0;
 	}
 
 	/* Keep track of allocated boost groups */
@@ -895,6 +1198,176 @@ schedtune_test_nrg(unsigned long delta_pwr)
 #define schedtune_test_nrg(delta_pwr)
 #endif
 
+void show_ste_info(void)
+{
+	struct target_nrg *ste = &schedtune_target_nrg;
+	int cluster_nr = arch_get_nr_clusters();
+	int i;
+	struct cpumask cluster_cpus;
+	int cluster_first_cpu_ste = 0;
+	const struct sched_group_energy *core_eng_ste;
+	int core_nr_cap_ste = 0;
+
+	printk_deferred("STE: min=%lu max=%lu\n",
+			ste->min_power, ste->max_power);
+
+	for (i = 0; i < cluster_nr; i++) {
+		arch_get_cluster_cpus(&cluster_cpus, i);
+		cluster_first_cpu_ste = cpumask_first(&cluster_cpus);
+		core_eng_ste = cpu_core_energy(cluster_first_cpu_ste);
+		core_nr_cap_ste = core_eng_ste->nr_cap_states;
+#ifdef CONFIG_MTK_UNIFY_POWER
+		ste->max_dyn_pwr[i] =
+		core_eng_ste->cap_states[core_nr_cap_ste - 1].dyn_pwr;
+		ste->max_stc_pwr[i] =
+		core_eng_ste->cap_states[core_nr_cap_ste - 1].lkg_pwr[0];
+
+		printk_deferred("STE: cid=%d max_dync=%lu max_stc=%lu\n",
+				i, ste->max_dyn_pwr[i], ste->max_stc_pwr[i]);
+#else
+		ste->max_pwr[i] =
+		core_eng_ste->cap_states[core_nr_cap_ste - 1].power;
+
+		printk_deferred("STE: cid=%d max_pwr=%lu\n",
+			i, ste->max_pwr[i]);
+#endif
+	}
+}
+
+void show_pwr_info(void)
+{
+	char str[32];
+#ifdef CONFIG_MTK_UNIFY_POWER
+	unsigned long dyn_pwr;
+	unsigned long stc_pwr;
+#else
+	unsigned long pwr;
+#endif
+	const struct sched_group_energy *clu_eng, *core_eng;
+	int cpu;
+	int cluster_first_cpu = 0;
+	int clu_nr_cap = 0, core_nr_cap = 0;
+	struct hmp_domain *domain;
+
+	/* Get num of all clusters */
+	for_each_hmp_domain_L_first(domain) {
+		cluster_first_cpu = cpumask_first(&domain->possible_cpus);
+
+		snprintf(str, 32, "CLUSTER[%*pbl]",
+				cpumask_pr_args(&domain->possible_cpus));
+
+		/*
+		 * Get Cluster energy using EM data of first CPU
+		 * in this cluster
+		 */
+		clu_eng = cpu_cluster_energy(cluster_first_cpu);
+		clu_nr_cap = clu_eng->nr_cap_states;
+#ifdef CONFIG_MTK_UNIFY_POWER
+		dyn_pwr =
+		clu_eng->cap_states[clu_nr_cap - 1].dyn_pwr;
+		stc_pwr =
+		clu_eng->cap_states[clu_nr_cap - 1].lkg_pwr[0];
+		pr_info("pwr_tlb: %-17s dyn_pwr: %5lu stc_pwr: %5lu\n",
+				str, dyn_pwr, stc_pwr);
+#else
+		pwr = clu_eng->cap_states[clu_nr_cap - 1].power;
+		pr_info("pwr_tlb: %-17s pwr: %5lu\n",
+				str, pwr);
+#endif
+		/* Get CPU energy using EM data for each CPU in this cluster */
+		for_each_cpu(cpu, &domain->possible_cpus) {
+			core_eng = cpu_core_energy(cpu);
+			core_nr_cap = core_eng->nr_cap_states;
+			snprintf(str, 32, "CPU[%d]", cpu);
+#ifdef CONFIG_MTK_UNIFY_POWER
+			dyn_pwr =
+			core_eng->cap_states[core_nr_cap - 1].dyn_pwr;
+			stc_pwr =
+			core_eng->cap_states[core_nr_cap - 1].lkg_pwr[0];
+
+			pr_info("pwr_tlb: %-17s dyn_pwr: %5lu stc_pwr: %5lu\n",
+					str, dyn_pwr, stc_pwr);
+#else
+			pwr = core_eng->cap_states[core_nr_cap - 1].power;
+			pr_info("pwr_tlb: %-17s pwr: %5lu\n",
+					str, pwr);
+#endif
+		}
+	}
+}
+
+#ifdef CONFIG_HOTPLUG_CPU
+/*
+ * mtk: Because system only eight cores online when init, we compute
+ * the min/max power consumption of all possible clusters and CPUs.
+ */
+static void
+schedtune_add_cluster_nrg_hotplug(struct target_nrg *ste)
+{
+	char str[32];
+	unsigned long min_pwr;
+	unsigned long max_pwr;
+	const struct sched_group_energy *clu_eng, *core_eng;
+	int cpu;
+	int cluster_first_cpu = 0;
+	int clu_nr_cap = 0, core_nr_cap = 0;
+	int clu_nr_idle = 0, core_nr_idle = 0;
+	struct hmp_domain *domain;
+
+	/* Get num of all clusters */
+	for_each_hmp_domain_L_first(domain) {
+		cluster_first_cpu = cpumask_first(&domain->possible_cpus);
+
+		snprintf(str, 32, "CLUSTER[%*pbl]",
+			cpumask_pr_args(&domain->possible_cpus));
+
+		/*
+		 * Get Cluster energy using EM data of first CPU
+		 * in this cluster.
+		 */
+		clu_eng = cpu_cluster_energy(cluster_first_cpu);
+		clu_nr_cap = clu_eng->nr_cap_states;
+		clu_nr_idle = clu_eng->nr_idle_states;
+		min_pwr =
+		clu_eng->idle_states[clu_nr_idle - 1].power;
+#ifdef CONFIG_MTK_UNIFY_POWER
+		max_pwr =
+		(clu_eng->cap_states[clu_nr_cap - 1].dyn_pwr +
+		   clu_eng->cap_states[clu_nr_cap - 1].lkg_pwr[0]);
+#else
+		max_pwr = clu_eng->cap_states[clu_nr_cap - 1].power;
+#endif
+		pr_info("schedtune: %-17s min_pwr: %5lu max_pwr: %5lu\n",
+			str, min_pwr, max_pwr);
+
+		ste->min_power += min_pwr;
+		ste->max_power += max_pwr;
+
+		/* Get CPU energy using EM data for each CPU in this cluster */
+		for_each_cpu(cpu, &domain->possible_cpus) {
+			core_eng = cpu_core_energy(cpu);
+			core_nr_cap = core_eng->nr_cap_states;
+			core_nr_idle = core_eng->nr_idle_states;
+			min_pwr =
+			core_eng->idle_states[core_nr_idle - 1].power;
+#ifdef CONFIG_MTK_UNIFY_POWER
+			max_pwr =
+			(core_eng->cap_states[core_nr_cap - 1].dyn_pwr +
+			core_eng->cap_states[core_nr_cap - 1].lkg_pwr[0]);
+#else
+			max_pwr =
+			core_eng->cap_states[core_nr_cap - 1].power;
+#endif
+			ste->min_power += min_pwr;
+			ste->max_power += max_pwr;
+
+			snprintf(str, 32, "CPU[%d]", cpu);
+			pr_info("schedtune: %-17s min_pwr: %5lu max_pwr: %5lu\n",
+				str, min_pwr, max_pwr);
+		}
+	}
+}
+#else
 /*
  * Compute the min/max power consumption of a cluster and all its CPUs
  */
@@ -920,7 +1393,12 @@ schedtune_add_cluster_nrg(
 		 cpumask_pr_args(cluster_cpus));
 
 	min_pwr = sg->sge->idle_states[sg->sge->nr_idle_states - 1].power;
+#ifdef CONFIG_MTK_UNIFY_POWER
+	max_pwr = sg->sge->cap_states[sg->sge->nr_cap_states - 1].dyn_pwr +
+		sg->sge->cap_states[sg->sge->nr_cap_states - 1].lkg_pwr[0];
+#else
 	max_pwr = sg->sge->cap_states[sg->sge->nr_cap_states - 1].power;
+#endif
 	pr_info("schedtune: %-17s min_pwr: %5lu max_pwr: %5lu\n",
 		str, min_pwr, max_pwr);
 
@@ -938,7 +1416,12 @@ schedtune_add_cluster_nrg(
 			/* Get the CPU group */
 			sg2 = sd2->groups;
 			min_pwr = sg2->sge->idle_states[sg2->sge->nr_idle_states - 1].power;
+#ifdef CONFIG_MTK_UNIFY_POWER
+			max_pwr = sg2->sge->cap_states[sg2->sge->nr_cap_states - 1].dyn_pwr +
+				sg2->sge->cap_states[sg2->sge->nr_cap_states - 1].lkg_pwr[0];
+#else
 			max_pwr = sg2->sge->cap_states[sg2->sge->nr_cap_states - 1].power;
+#endif
 
 			ste->min_power += min_pwr;
 			ste->max_power += max_pwr;
@@ -959,6 +1442,7 @@ schedtune_add_cluster_nrg(
 		}
 	}
 }
+#endif /* define CONFIG_HOTPLUG_CPU */
 
 /*
  * Initialize the constants required to compute normalized energy.
@@ -972,12 +1456,25 @@ schedtune_init(void)
 {
 	struct target_nrg *ste = &schedtune_target_nrg;
 	unsigned long delta_pwr = 0;
+#ifdef CONFIG_HOTPLUG_CPU
+	const struct sched_group_energy *sge_core;
+	struct hmp_domain *domain;
+	int cluster_first_cpu = 0;
+#else
 	struct sched_domain *sd;
 	struct sched_group *sg;
+#endif
+	int i;
 
 	pr_info("schedtune: init normalization constants...\n");
 	ste->max_power = 0;
 	ste->min_power = 0;
+#ifdef CONFIG_MTK_UNIFY_POWER
+	memset(ste->max_dyn_pwr, 0, sizeof(ste->max_dyn_pwr));
+	memset(ste->max_stc_pwr, 0, sizeof(ste->max_stc_pwr));
+#else
+	memset(ste->max_pwr, 0, sizeof(ste->max_pwr));
+#endif
 
 	rcu_read_lock();
 
@@ -985,25 +1482,77 @@ schedtune_init(void)
 	 * When EAS is in use, we always have a pointer to the highest SD
 	 * which provides EM data.
 	 */
+#ifdef CONFIG_HOTPLUG_CPU
+	for_each_hmp_domain_L_first(domain) {
+		cluster_first_cpu = cpumask_first(&domain->possible_cpus);
+		/* lowest capacity CPU in system */
+		sge_core = cpu_core_energy(cluster_first_cpu);
+		if (!sge_core) {
+			pr_info("schedtune: no energy model data\n");
+			goto nodata;
+		}
+		default_stune_threshold = sge_core->cap_states[0].cap;
+
+		if (default_stune_threshold)
+			break;
+	}
+#else
 	sd = rcu_dereference(per_cpu(sd_ea, cpumask_first(cpu_online_mask)));
+
 	if (!sd) {
 		pr_info("schedtune: no energy model data\n");
 		goto nodata;
 	}
 
 	sg = sd->groups;
+
+	default_stune_threshold = sg->sge->cap_states[0].cap;
+#endif
+
+#ifdef CONFIG_HOTPLUG_CPU
+	/*
+	 * mtk: compute max_power & min_power of all possible cores,
+	 * not only online cores.
+	 */
+	schedtune_add_cluster_nrg_hotplug(ste);
+#else
 	do {
 		schedtune_add_cluster_nrg(sd, sg, ste);
 	} while (sg = sg->next, sg != sd->groups);
-
+#endif
 	rcu_read_unlock();
 
 	pr_info("schedtune: %-17s min_pwr: %5lu max_pwr: %5lu\n",
 		"SYSTEM", ste->min_power, ste->max_power);
 
+	/* Get capacity & freq information */
+	cpu_cluster_nr = arch_get_nr_clusters();
+
+	for (i = 0; i < cpu_cluster_nr ; i++) {
+		struct cpumask cluster_cpus;
+		int first_cpu;
+		const struct sched_group_energy *pwr_tlb;
+
+		arch_get_cluster_cpus(&cluster_cpus, i);
+		first_cpu = cpumask_first(&cluster_cpus);
+		pwr_tlb = cpu_core_energy(first_cpu);
+
+		schedtune_target_cap[i].cap =
+			pwr_tlb->cap_states[pwr_tlb->nr_cap_states - 1].cap;
+#ifdef CONFIG_CPU_FREQ_GOV_SCHEDPLUS
+		schedtune_target_cap[i].freq = mt_cpufreq_get_freq_by_idx(i, 0);
+#endif
+	}
+
 	/* Compute normalization constants */
 	delta_pwr = ste->max_power - ste->min_power;
-	ste->rdiv = reciprocal_value(delta_pwr);
+	if (delta_pwr > 0)
+		ste->rdiv = reciprocal_value(delta_pwr);
+	else {
+		ste->rdiv.m = 0;
+		ste->rdiv.sh1 = 0;
+		ste->rdiv.sh2 = 0;
+	}
 	pr_info("schedtune: using normalization constants mul: %u sh1: %u sh2: %u\n",
 		ste->rdiv.m, ste->rdiv.sh1, ste->rdiv.sh2);
 
@@ -1024,4 +1573,4 @@ nodata:
 	rcu_read_unlock();
 	return -EINVAL;
 }
-postcore_initcall(schedtune_init);
+late_initcall_sync(schedtune_init);

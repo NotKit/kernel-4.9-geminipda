@@ -1615,7 +1615,7 @@ config KALLSYMS_ABSOLUTE_PERCPU
 	default X86_64 && SMP
 
 config KALLSYMS_BASE_RELATIVE
-	bool
+	bool "Enable KALLSYMS_BASE_RELATIVE or not"
 	depends on KALLSYMS
 	default !IA64 && !(TILE && 64BIT)
 	help
@@ -1892,6 +1892,7 @@ config SLUB_DEBUG
 	default y
 	bool "Enable SLUB debugging support" if EXPERT
 	depends on SLUB && SYSFS
+	depends on !MTK_ENABLE_AGO
 	help
 	  SLUB has extensive debug support features. Disabling these can
 	  result in significant savings in code size. This also disables
@@ -2029,6 +2030,7 @@ config HAVE_GENERIC_DMA_COHERENT
 config SLABINFO
 	bool
 	depends on PROC_FS
+	depends on !MTK_ENABLE_GMO
 	depends on SLAB || SLUB_DEBUG
 	default y
 
