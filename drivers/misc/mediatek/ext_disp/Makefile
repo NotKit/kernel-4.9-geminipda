@@ -18,10 +18,10 @@ ifeq ($(PLATFORM),mt6761)
 PLATFORM := mt6765
 endif
 
-ifeq ($(CONFIG_SINGLE_PANEL_OUTPUT),y)
-else ifneq ($(wildcard $(srctree)/drivers/misc/mediatek/ext_disp/$(PLATFORM)/),)
-obj-y += $(PLATFORM)/
-obj-y += common/
-else
+# ifeq ($(CONFIG_SINGLE_PANEL_OUTPUT),y)
+# else ifneq ($(wildcard $(srctree)/drivers/misc/mediatek/ext_disp/$(PLATFORM)/),)
+# obj-y += $(PLATFORM)/
+# obj-y += common/
+# else
 obj-y += dummy/
-endif
+# endif

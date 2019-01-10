@@ -2,7 +2,7 @@
 # Makefile for the linux kernel.
 #
 
-subdir-ccflags-y += -Werror
+subdir-ccflags-y += -Wno-error=maybe-uninitialized -Werror
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/mtprof

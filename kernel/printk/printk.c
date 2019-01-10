@@ -70,7 +70,7 @@ static u64 overflow_gap;
  */
 int printk_disable_uart;
 
-module_param_named(disable_uart, printk_disable_uart, int, 0644);
+module_param_named(disable_uart_disabled, printk_disable_uart, int, 0644);
 
 bool mt_get_uartlog_status(void)
 {
@@ -93,8 +93,8 @@ void set_uartlog_status(bool value)
 void mt_disable_uart(void)
 {
 	/* uart print not always enable */
-	if ((mt_need_uart_console != 1) && (printk_disable_uart != 2))
-		printk_disable_uart = 1;
+	//if ((mt_need_uart_console != 1) && (printk_disable_uart != 2))
+	//	printk_disable_uart = 1;
 }
 void mt_enable_uart(void)
 {

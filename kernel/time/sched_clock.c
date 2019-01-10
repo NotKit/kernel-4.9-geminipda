@@ -188,8 +188,8 @@ static enum hrtimer_restart sched_clock_poll(struct hrtimer *hrt)
 	update_sched_clock();
 	hrtimer_forward_now(hrt, cd.wrap_kt);
 
-	/* snchronize new sched_clock base to co-processors */
-	sys_timer_timesync_sync_base(SYS_TIMER_TIMESYNC_FLAG_ASYNC);
+// 	/* snchronize new sched_clock base to co-processors */
+// 	sys_timer_timesync_sync_base(SYS_TIMER_TIMESYNC_FLAG_ASYNC);
 
 	return HRTIMER_RESTART;
 }
@@ -312,9 +312,9 @@ static int sched_clock_suspend(void)
 
 	rd->read_sched_clock = suspended_sched_clock_read;
 
-	/* snchronize new sched_clock base to co-processors */
-	sys_timer_timesync_sync_base(SYS_TIMER_TIMESYNC_FLAG_SYNC |
-		SYS_TIMER_TIMESYNC_FLAG_FREEZE);
+// 	/* snchronize new sched_clock base to co-processors */
+// 	sys_timer_timesync_sync_base(SYS_TIMER_TIMESYNC_FLAG_SYNC |
+// 		SYS_TIMER_TIMESYNC_FLAG_FREEZE);
 
 	return 0;
 }
@@ -327,8 +327,8 @@ static void sched_clock_resume(void)
 	hrtimer_start(&sched_clock_timer, cd.wrap_kt, HRTIMER_MODE_REL);
 	rd->read_sched_clock = cd.actual_read_sched_clock;
 
-	/* snchronize new sched_clock base to co-processors */
-	sys_timer_timesync_sync_base(SYS_TIMER_TIMESYNC_FLAG_SYNC);
+// 	/* snchronize new sched_clock base to co-processors */
+// 	sys_timer_timesync_sync_base(SYS_TIMER_TIMESYNC_FLAG_SYNC);
 }
 
 static struct syscore_ops sched_clock_ops = {
