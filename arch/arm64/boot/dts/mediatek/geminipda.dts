@@ -5,8 +5,8 @@
 // so the include path must be relative to that.
 #include "mediatek/mt6797.dtsi"
 #include <dt-bindings/interrupt-controller/arm-gic.h>
-//#include <dt-bindings/power/mt6797-power.h>
-//#include <dt-bindings/reset/mt6797-resets.h>
+#include <dt-bindings/power/mt6797-power.h>
+#include <dt-bindings/reset/mt6797-resets.h>
 
 / {
 	model = "MT6797X";
@@ -35,8 +35,8 @@
 		interrupts = <GIC_SPI 178 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&topckgen CLK_TOP_MUX_PMICSPI>, <&pwrap_clk>;
 		clock-names = "spi", "wrap";
-		//resets = <&infrasys MT6797_INFRA_PMIC_WRAP_RST>;
-		//reset-names = "pwrap";
+		resets = <&infrasys MT6797_INFRA_PMIC_WRAP_RST>;
+		reset-names = "pwrap";
 		pmic: mt6351 {
 			compatible = "mediatek,mt6351";
 		};
