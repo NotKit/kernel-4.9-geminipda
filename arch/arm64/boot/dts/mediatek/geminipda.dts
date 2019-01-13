@@ -5,6 +5,7 @@
 // so the include path must be relative to that.
 #include "mediatek/mt6797.dtsi"
 #include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/clock/mt6797-clk.h>
 #include <dt-bindings/power/mt6797-power.h>
 #include <dt-bindings/reset/mt6797-resets.h>
 
@@ -18,6 +19,37 @@
 	chosen {
 		// Specifying cmdline here is useless, since they are
 		// overwritten by LK. CMDLINE is overridden in kernel config.
+	};
+
+	/* Do not put any bus before mtk-msdc, because it should be mtk-msdc.0 for partition device node usage */
+	/* Kernel-3.18 can't transfer this node to mtk-msdc.0. So workaround here */
+	mtk-msdc.0 {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges = <0 0 0 0xffffffff>;
+		mmc0:msdc0@11230000 {
+			compatible = "mediatek,mt6797-mmc";
+			reg = <0x11230000 0x10000>;
+			interrupts = <GIC_SPI 79 IRQ_TYPE_LEVEL_LOW>;
+			clocks = <&infrasys CLK_INFRA_MSDC0>;
+			clock-names = "msdc0-clock";
+			status = "disabled";
+		};
+
+		mmc1:msdc1@11240000 {
+			compatible = "mediatek,mt6797-mmc";
+			reg = <0x11240000 0x10000>;
+			interrupts = <GIC_SPI 80 IRQ_TYPE_LEVEL_LOW>;
+			clocks = <&infrasys CLK_INFRA_MSDC0>;
+			clock-names = "msdc1-clock";
+			status = "disabled";
+		};
+
+	};
+
+	msdc1_ins: msdc1_ins@0 {
+		compatible = "mediatek,mt6797-sdcard-ins";
 	};
 
 	// pwrap needs a pwrap clock, but MT6797 does not have one. Make a
@@ -411,6 +443,26 @@
 		#size-cells = <1>;
 		ranges = <0 0 0 0xffffffff>;
 
+		iocfg_b@10002400 {
+			compatible = "mediatek,iocfg_b";
+			reg = <0x10002400 0x400>;
+		};
+
+		iocfg_r@10002800 {
+			compatible = "mediatek,iocfg_r";
+			reg = <0x10002800 0x400>;
+		};
+
+		pericfg@10003000 {
+			compatible = "mediatek,pericfg";
+			reg = <0x10003000 0x1000>;
+		};
+
+		gpio@10005000 {
+			compatible = "mediatek,gpio";
+			reg = <0x10005000 0x1000>;
+		};
+
 		// This node is required by MediaTek's LK bootloader.
 		scp: scp@10020000 {
 			compatible = "mediatek,scp";
@@ -587,6 +639,103 @@
 		vib_limit = <9>;
 		vib_vol= <5>;
 	};
+
+	mmc0_pins_default: mmc0@default {
+		pins_cmd {
+			drive-strength = /bits/ 8 <1>;
+		};
+		pins_dat {
+			drive-strength = /bits/ 8 <1>;
+		};
+		pins_clk {
+			drive-strength = /bits/ 8 <1>;
+		};
+		pins_rst {
+			drive-strength = /bits/ 8 <1>;
+		};
+		pins_ds {
+			drive-strength = /bits/ 8 <1>;
+		};
+	};
+
+	mmc0_register_setting_default: mmc0@register_default {
+		dat0rddly      = /bits/ 8 <0>;
+		dat1rddly      = /bits/ 8 <0>;
+		dat2rddly      = /bits/ 8 <0>;
+		dat3rddly      = /bits/ 8 <0>;
+		dat4rddly      = /bits/ 8 <0>;
+		dat5rddly      = /bits/ 8 <0>;
+		dat6rddly      = /bits/ 8 <0>;
+		dat7rddly      = /bits/ 8 <0>;
+		datwrddly      = /bits/ 8 <0>;
+		cmdrrddly      = /bits/ 8 <0>;
+		cmdrddly       = /bits/ 8 <0>;
+		//cmd_edge = /bits/ 8 <MSDC_SMPL_FALLING>;
+		//rdata_edge = /bits/ 8 <MSDC_SMPL_FALLING>;
+		//wdata_edge = /bits/ 8 <MSDC_SMPL_FALLING>;
+	};
+
+	mmc1_pins_default: mmc1@default {
+		pins_cmd {
+			drive-strength = /bits/ 8 <6>;
+		};
+		pins_dat {
+			drive-strength = /bits/ 8 <6>;
+		};
+		pins_clk {
+			drive-strength = /bits/ 8 <6>;
+		};
+	};
+
+	mmc1_pins_sdr104: mmc1@sdr104 {
+		pins_cmd {
+			drive-strength = /bits/ 8 <3>;
+		};
+		pins_dat {
+			drive-strength = /bits/ 8 <3>;
+		};
+		pins_clk {
+			drive-strength = /bits/ 8 <4>;
+		};
+	};
+
+	mmc1_pins_sdr50: mmc1@sdr50 {
+		pins_cmd {
+			drive-strength = /bits/ 8 <3>;
+		};
+		pins_dat {
+			drive-strength = /bits/ 8 <3>;
+		};
+		pins_clk {
+			drive-strength = /bits/ 8 <4>;
+		};
+	};
+
+	mmc1_pins_ddr50: mmc1@ddr50 {
+		pins_cmd {
+			drive-strength = /bits/ 8 <3>;
+		};
+		pins_dat {
+			drive-strength = /bits/ 8 <3>;
+		};
+		pins_clk {
+			drive-strength = /bits/ 8 <4>;
+		};
+	};
+
+	mmc1_register_setting_default: mmc1@register_default {
+		dat0rddly      = /bits/ 8 <0>;
+		dat1rddly      = /bits/ 8 <0>;
+		dat2rddly      = /bits/ 8 <0>;
+		dat3rddly      = /bits/ 8 <0>;
+		datwrddly      = /bits/ 8 <0>;
+		cmdrrddly      = /bits/ 8 <0>;
+		cmdrddly       = /bits/ 8 <0>;
+		//cmd_edge = /bits/ 8 <MSDC_SMPL_FALLING>;
+		//rdata_edge = /bits/ 8 <MSDC_SMPL_FALLING>;
+		//wdata_edge = /bits/ 8 <MSDC_SMPL_FALLING>;
+	};
+
 };
 
 // clock-frequency must be specified for each CPU. If it is omitted, MediaTek's
@@ -715,4 +864,24 @@
 
 &uart0 {
 	status = "okay";
+};
+
+/* mmc start */
+&mmc0 {
+		//clk_src = /bits/ 8 <MSDC0_CLKSRC_400MHZ>;
+		clk_src = /bits/ 8 <1>;
+		bus-width = <8>;
+		max-frequency = <200000000>;
+		cap-mmc-highspeed;
+		msdc-sys-suspend;
+		mmc-ddr-1_8v;
+		mmc-hs200-1_8v;
+		mmc-hs400-1_8v;
+		non-removable;
+		pinctl = <&mmc0_pins_default>;
+		register_setting = <&mmc0_register_setting_default>;
+		//host_function = /bits/ 8 <MSDC_EMMC>;
+		host_function = /bits/ 8 <0>;
+		bootable;
+		status = "okay";
 };
