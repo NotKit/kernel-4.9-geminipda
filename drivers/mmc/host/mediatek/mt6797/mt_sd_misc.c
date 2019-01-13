@@ -34,7 +34,7 @@
 
 #include "mt_sd.h"
 #include <core.h>
-#include <mt-plat/sd_misc.h>
+#include <mt-plat/mtk_sd_misc.h>
 #include "msdc_io.h"
 #include "dbg.h"
 
@@ -407,7 +407,7 @@ static int simple_sd_ioctl_get_csd(struct msdc_ioctl *msdc_ctl)
 
 static int simple_sd_ioctl_get_excsd(struct msdc_ioctl *msdc_ctl)
 {
-	char *l_buf;
+	u8 *l_buf;
 	struct msdc_host *host_ctl;
 	int ret;
 
@@ -424,16 +424,12 @@ static int simple_sd_ioctl_get_excsd(struct msdc_ioctl *msdc_ctl)
 			IS_ERR_OR_NULL(host_ctl->mmc->card))
 		return -EINVAL;
 
-	l_buf = kzalloc((512), GFP_KERNEL);
-	if (!l_buf)
-		return -ENOMEM;
-
 #if DEBUG_MMC_IOCTL
 	pr_debug("user want the extend csd in msdc slot%d\n",
 		msdc_ctl->host_num);
 #endif
 	mmc_claim_host(host_ctl->mmc);
-	ret = mmc_send_ext_csd(host_ctl->mmc->card, l_buf);
+	ret = mmc_get_ext_csd(host_ctl->mmc->card, &l_buf);
 	mmc_release_host(host_ctl->mmc);
 
 	if (ret)
@@ -457,7 +453,7 @@ static int simple_sd_ioctl_get_excsd(struct msdc_ioctl *msdc_ctl)
 
 static int simple_sd_ioctl_get_bootpart(struct msdc_ioctl *msdc_ctl)
 {
-	char *l_buf;
+	u8 *l_buf;
 	struct msdc_host *host_ctl;
 	int ret = 0;
 	int bootpart = 0;
@@ -470,19 +466,15 @@ static int simple_sd_ioctl_get_bootpart(struct msdc_ioctl *msdc_ctl)
 	if (msdc_ctl->buffer == NULL)
 		return -EINVAL;
 
-	l_buf = kzalloc((512), GFP_KERNEL);
-	if (!l_buf)
-		return -ENOMEM;
-
 	mmc_claim_host(host_ctl->mmc);
 
 #if DEBUG_MMC_IOCTL
 	pr_debug("user want get boot partition info in msdc slot%d\n",
 		msdc_ctl->host_num);
 #endif
-	ret = mmc_send_ext_csd(host_ctl->mmc->card, l_buf);
+	ret = mmc_get_ext_csd(host_ctl->mmc->card, &l_buf);
 	if (ret) {
-		pr_debug("mmc_send_ext_csd error, get boot part\n");
+		pr_debug("mmc_get_ext_csd error, get boot part\n");
 		goto end;
 	}
 	bootpart = (l_buf[EXT_CSD_PART_CFG] & 0x38) >> 3;
@@ -511,7 +503,7 @@ end:
 
 static int simple_sd_ioctl_set_bootpart(struct msdc_ioctl *msdc_ctl)
 {
-	char *l_buf;
+	u8 *l_buf;
 	struct msdc_host *host_ctl;
 	int ret = 0;
 	int bootpart = 0;
@@ -525,19 +517,14 @@ static int simple_sd_ioctl_set_bootpart(struct msdc_ioctl *msdc_ctl)
 	if (msdc_ctl->buffer == NULL)
 		return -EINVAL;
 
-	l_buf = kzalloc((512), GFP_KERNEL);
-	if (!l_buf)
-		return -ENOMEM;
-
 #if DEBUG_MMC_IOCTL
 	pr_debug("user want set boot partition in msdc slot%d\n",
 		msdc_ctl->host_num);
 #endif
 	mmc_claim_host(host_ctl->mmc);
-	ret = mmc_send_ext_csd(host_ctl->mmc->card, l_buf);
-
+	ret = mmc_get_ext_csd(host_ctl->mmc->card, &l_buf);
 	if (ret) {
-		pr_debug("mmc_send_ext_csd error, set boot partition\n");
+		pr_debug("mmc_get_ext_csd error, set boot partition\n");
 		goto end;
 	}
 
@@ -730,78 +717,9 @@ struct mbr_part_info {
 	unsigned char *part_name;
 };
 
-#define MBR_PART_NUM            6
 #define __MMC_ERASE_ARG         0x00000000
 #define __MMC_TRIM_ARG          0x00000001
 #define __MMC_DISCARD_ARG       0x00000003
-
-int msdc_get_info(STORAGE_TPYE storage_type, GET_STORAGE_INFO info_type,
-	struct storage_info *info)
-{
-	struct msdc_host *host = NULL;
-	int host_function = 0;
-	bool boot = 0;
-
-	if (!info)
-		return -EINVAL;
-
-	switch (storage_type) {
-	case EMMC_CARD_BOOT:
-		host_function = MSDC_EMMC;
-		boot = MSDC_BOOT_EN;
-		break;
-	case EMMC_CARD:
-		host_function = MSDC_EMMC;
-		break;
-	case SD_CARD_BOOT:
-		host_function = MSDC_SD;
-		boot = MSDC_BOOT_EN;
-		break;
-	case SD_CARD:
-		host_function = MSDC_SD;
-		break;
-	default:
-		pr_err("No supported storage type!");
-		return 0;
-	}
-	host = msdc_get_host(host_function, boot, 0);
-	if (!host || !host->mmc)
-		return -EINVAL;
-	switch (info_type) {
-	/* FIXME: check if any user space program use this EMMC_XXX */
-	case CARD_INFO:
-		if (host->mmc->card)
-			info->card = host->mmc->card;
-		else {
-			pr_err("CARD was not ready<get card>!");
-			return 0;
-		}
-		break;
-	case DISK_INFO:
-		if (host->mmc->card)
-			info->disk = mmc_get_disk(host->mmc->card);
-		else {
-			pr_err("CARD was not ready<get disk>!");
-			return 0;
-		}
-		break;
-	case EMMC_USER_CAPACITY:
-		info->emmc_user_capacity = msdc_get_capacity(0);
-		break;
-	case EMMC_CAPACITY:
-		info->emmc_capacity = msdc_get_capacity(1);
-		break;
-	case EMMC_RESERVE:
-#ifdef CONFIG_MTK_EMMC_SUPPORT
-		info->emmc_reserve = 0;
-#endif
-		break;
-	default:
-		pr_err("Please check INFO_TYPE");
-		return 0;
-	}
-	return 1;
-}
 
 #ifdef CONFIG_MTK_EMMC_SUPPORT
 static int simple_mmc_get_disk_info(struct mbr_part_info *mpi,
@@ -809,15 +727,16 @@ static int simple_mmc_get_disk_info(struct mbr_part_info *mpi,
 {
 	struct disk_part_iter piter;
 	struct hd_struct *part;
-	struct msdc_host *host;
 	struct gendisk *disk;
+	int partno;
+	dev_t devt;
 
 	/* emmc always in slot0 */
-	host = msdc_get_host(MSDC_EMMC, MSDC_BOOT_EN, 0);
-	if (IS_ERR_OR_NULL(host) || IS_ERR_OR_NULL(host->mmc) ||
-			IS_ERR_OR_NULL(host->mmc->card))
-		return -EINVAL;
-	disk = mmc_get_disk(host->mmc->card);
+	devt = blk_lookup_devt("mmcblk0", 0);
+	disk = get_gendisk(devt, &partno);
+
+	if (!disk)
+		return 1;
 
 	/* Find partition info in this way to
 	 * avoid addr translation in scatter file and 64bit address calculate */

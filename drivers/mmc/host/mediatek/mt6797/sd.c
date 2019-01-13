@@ -30,7 +30,6 @@
 #include <linux/delay.h>
 #include <linux/blkdev.h>
 #include <linux/slab.h>
-#include <linux/wakelock.h>
 #include <linux/mmc/host.h>
 #include <linux/mmc/card.h>
 #include <linux/mmc/core.h>
@@ -54,7 +53,7 @@
 #include <linux/fs.h>
 #include <core.h>
 #include <queue.h>
-#include <mt-plat/mt_boot.h>
+#include <mt-plat/mtk_boot.h>
 #include <linux/proc_fs.h>
 #ifdef MTK_MSDC_BRINGUP_DEBUG
 #include <mach/mt_pmic_wrap.h>
@@ -1396,9 +1395,12 @@ EXPORT_SYMBOL(msdc_get_host);
 int msdc_switch_part(struct msdc_host *host, char part_id)
 {
 	int ret = 0;
-	char l_buf[512];
+	u8 *l_buf;
 
-	ret = mmc_send_ext_csd(host->mmc->card, l_buf);
+	if (!host || !host->mmc || !host->mmc->card)
+		return -ENOMEDIUM;
+
+	ret = mmc_get_ext_csd(host->mmc->card, &l_buf);
 	if (ret)
 		return ret;
 
@@ -1408,6 +1410,7 @@ int msdc_switch_part(struct msdc_host *host, char part_id)
 		ret = mmc_switch(host->mmc->card, 0, EXT_CSD_PART_CONFIG,
 			l_buf[EXT_CSD_PART_CONFIG], 1000);
 	}
+	kfree(l_buf);
 
 	return ret;
 }

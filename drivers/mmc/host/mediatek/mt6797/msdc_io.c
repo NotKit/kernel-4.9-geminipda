@@ -357,10 +357,7 @@ struct device_node *io_cfg_r_node;
 
 /* debug node */
 struct device_node *infracfg_ao_node;
-struct device_node *infracfg_node;
 struct device_node *pericfg_node;
-struct device_node *emi_node;
-struct device_node *toprgu_node;
 struct device_node *apmixed_node;
 struct device_node *topckgen_node;
 
@@ -372,10 +369,7 @@ void __iomem *io_cfg_b_base;
 void __iomem *io_cfg_r_base;
 
 void __iomem *infracfg_ao_reg_base;
-void __iomem *infracfg_reg_base;
 void __iomem *pericfg_reg_base;
-void __iomem *emi_reg_base;
-void __iomem *toprgu_reg_base;
 void __iomem *apmixed_reg_base;
 void __iomem *topckgen_reg_base;
 
@@ -654,24 +648,13 @@ int msdc_dt_init(struct platform_device *pdev, struct mmc_host *mmc,
 	}
 	if (infracfg_ao_node == NULL) {
 		infracfg_ao_node = of_find_compatible_node(NULL, NULL,
-			"mediatek,infracfg_ao");
+			"mediatek,mt6797-infracfg");
 		if (infracfg_ao_node == NULL)
 			pr_err("msdc get mediatek,infracfg_ao failed\n");
 		else
 			infracfg_ao_reg_base = of_iomap(infracfg_ao_node, 0);
 		pr_debug("of_iomap for infracfg_ao base @ 0x%p\n",
 			infracfg_ao_reg_base);
-	}
-
-	if (infracfg_node == NULL) {
-		infracfg_node = of_find_compatible_node(NULL, NULL,
-			"mediatek,infracfg");
-		if (infracfg_node == NULL)
-			pr_err("msdc get infracfg_node failed\n");
-		else
-			infracfg_reg_base = of_iomap(infracfg_node, 0);
-		pr_debug("of_iomap for infracfg base @ 0x%p\n",
-			infracfg_reg_base);
 	}
 
 	if (pericfg_node == NULL) {
@@ -685,31 +668,10 @@ int msdc_dt_init(struct platform_device *pdev, struct mmc_host *mmc,
 			pericfg_reg_base);
 	}
 
-	if (emi_node == NULL) {
-		emi_node = of_find_compatible_node(NULL, NULL,
-			"mediatek,emi");
-		if (emi_node == NULL)
-			pr_err("msdc get emi_node failed\n");
-		else
-			emi_reg_base = of_iomap(emi_node, 0);
-		pr_debug("of_iomap for emi base @ 0x%p\n",
-			emi_reg_base);
-	}
-
-	if (toprgu_node == NULL) {
-		toprgu_node = of_find_compatible_node(NULL, NULL,
-			"mediatek,mt6797-toprgu");
-		if (toprgu_node == NULL)
-			pr_err("msdc get toprgu_node failed\n");
-		else
-			toprgu_reg_base = of_iomap(toprgu_node, 0);
-		pr_debug("of_iomap for toprgu base @ 0x%p\n",
-			toprgu_reg_base);
-	}
 	/* Clock register base */
 	if (apmixed_node == NULL) {
 		apmixed_node = of_find_compatible_node(NULL, NULL,
-			"mediatek,apmixed");
+			"mediatek,mt6797-apmixedsys");
 		if (apmixed_node == NULL)
 			pr_err("msdc get apmixed_node failed\n");
 		else
@@ -719,7 +681,7 @@ int msdc_dt_init(struct platform_device *pdev, struct mmc_host *mmc,
 	}
 	if (topckgen_node == NULL) {
 		topckgen_node = of_find_compatible_node(NULL, NULL,
-			"mediatek,topckgen");
+			"mediatek,mt6797-topckgen");
 		if (topckgen_node == NULL)
 			pr_err("msdc get topckgen_node failed\n");
 		else
@@ -763,14 +725,7 @@ int msdc_dt_init(struct platform_device *pdev, struct mmc_host *mmc,
 }
 
 #include <dt-bindings/clock/mt6797-clk.h>
-#include <mt_clk_id.h>
 
-int msdc_cg_clk_id[HOST_MAX_NUM] = {
-	MT_CG_INFRA0_MSDC0_CG_STA,
-	MT_CG_INFRA0_MSDC1_CG_STA,
-	MT_CG_INFRA0_MSDC2_CG_STA,
-	MT_CG_INFRA0_MSDC3_CG_STA
-};
 /**************************************************************/
 /* Section 3: Clock                                           */
 /**************************************************************/
@@ -873,23 +828,7 @@ inline unsigned int msdc_clk_enable(struct msdc_host *host)
 {
 	return clk_enable(host->clock_control);
 }
-void msdc_clk_status(int *status)
-{
-	int g_clk_gate = 0;
-	int i = 0;
-	unsigned long flags;
 
-	for (i = 0; i < HOST_MAX_NUM; i++) {
-		if (!mtk_msdc_host[i])
-			continue;
-
-		spin_lock_irqsave(&mtk_msdc_host[i]->clk_gate_lock, flags);
-		if (mtk_msdc_host[i]->clk_gate_count > 0)
-			g_clk_gate |= 1 << msdc_cg_clk_id[i];
-		spin_unlock_irqrestore(&mtk_msdc_host[i]->clk_gate_lock, flags);
-	}
-	*status = g_clk_gate;
-}
 /**************************************************************/
 /* Section 4: GPIO and Pad                                    */
 /**************************************************************/

@@ -30,7 +30,6 @@
 #include <linux/slab.h>
 #include <linux/mmc/host.h>
 #include <linux/seq_file.h>
-#include <mach/mt_gpt.h>
 #include <asm/io.h>
 /* for fpga early porting */
 #include <linux/mmc/mmc.h>
@@ -1821,15 +1820,16 @@ void dbg_msdc_dump_clock_sts(struct seq_file *m, struct msdc_host *host)
 }
 void msdc_dump_ext_csd(struct seq_file *m, struct msdc_host *host)
 {
-	u8 ext_csd[512];
+	u8 *ext_csd;
 	u32 tmp;
+	int err;
 	static const char const *rev[] = {
 		"4.0", "4.1", "4.2", "4.3", "Obsolete", "4.41", "4.5", "5.0", "5.1"};
 
 	mmc_claim_host(host->mmc);
 
-	if (mmc_send_ext_csd(host->mmc->card, ext_csd)) {
-		seq_puts(m, "mmc_send_ext_csd failed\n");
+	if ((err = mmc_get_ext_csd(host->mmc->card, &ext_csd))) {
+		seq_printf(m, "mmc_get_ext_csd failed: %d\n", err);
 		mmc_release_host(host->mmc);
 		return;
 	}
@@ -2004,6 +2004,7 @@ void msdc_dump_ext_csd(struct seq_file *m, struct msdc_host *host)
 			 ext_csd[EXT_CSD_ENH_START_ADDR + 3]) << 24);
 	seq_printf(m, "[EXT_CSD] Bad block mgmt mode: %xh\n", ext_csd[EXT_CSD_BADBLK_MGMT]); */
 	seq_puts(m, "===========================================================\n");
+	kfree(ext_csd);
 }
 static void msdc_check_emmc_cache_status(struct seq_file *m,
 		struct msdc_host *host)

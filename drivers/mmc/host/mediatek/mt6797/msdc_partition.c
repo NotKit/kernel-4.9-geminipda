@@ -28,7 +28,6 @@
 #include <linux/delay.h>
 #include <linux/blkdev.h>
 #include <linux/slab.h>
-#include <linux/wakelock.h>
 #include <linux/mmc/host.h>
 #include <linux/mmc/card.h>
 #include <linux/mmc/core.h>
@@ -37,7 +36,7 @@
 #include <linux/printk.h>
 #include <linux/mm_types.h>
 #include <linux/seq_file.h>
-#include <mt-plat/mt_chip.h>
+#include <mt-plat/mtk_chip.h>
 
 #include <core.h>
 #include "mt_sd.h"
@@ -47,7 +46,7 @@
 #include <linux/proc_fs.h>
 #include <queue.h>
 
-#include <mt-plat/partition.h>
+#include <mt-plat/mtk_partition.h>
 
 struct mmc_blk_data {
 	spinlock_t lock;
@@ -266,45 +265,34 @@ u64 msdc_get_capacity(int get_emmc_total)
 }
 EXPORT_SYMBOL(msdc_get_capacity);
 
-struct gendisk *mmc_get_disk(struct mmc_card *card)
-{
-	struct mmc_blk_data *md;
-	/* struct gendisk *disk; */
-
-	BUG_ON(!card);
-	md = mmc_get_drvdata(card);
-	BUG_ON(!md);
-	BUG_ON(!md->disk);
-
-	return md->disk;
-}
-
 static struct proc_dir_entry *proc_emmc;
 
 static inline int emmc_proc_info(struct seq_file *m, struct hd_struct *this)
 {
 	char *no_partition_name = "n/a";
 
-	return seq_printf(m, "emmc_p%d: %8.8x %8.8x \"%s\"\n", this->partno,
+	seq_printf(m, "emmc_p%d: %8.8x %8.8x \"%s\"\n", this->partno,
 		(unsigned int)this->start_sect,
 		(unsigned int)this->nr_sects,
 		((this->info) ?
 			(char *)(this->info->volname) : no_partition_name));
+	return 0;
 }
 
 static int proc_emmc_show(struct seq_file *m, void *v)
 {
 	struct disk_part_iter piter;
 	struct hd_struct *part;
-	struct msdc_host *host;
 	struct gendisk *disk;
+	dev_t devt;
+	int partno;
 
 	/* emmc always in slot0 */
-	host = msdc_get_host(MSDC_EMMC, MSDC_BOOT_EN, 0);
-	BUG_ON(!host);
-	BUG_ON(!host->mmc);
-	BUG_ON(!host->mmc->card);
-	disk = mmc_get_disk(host->mmc->card);
+	devt = blk_lookup_devt("mmcblk0", 0);
+	disk = get_gendisk(devt, &partno);
+
+	if (!disk)
+		return 0;
 
 	seq_puts(m, "partno:    start_sect   nr_sects  partition_name\n");
 	disk_part_iter_init(&piter, disk, 0);
