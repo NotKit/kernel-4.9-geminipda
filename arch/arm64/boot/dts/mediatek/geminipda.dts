@@ -580,6 +580,13 @@
 			cache-sets = <512>;
 		};
 	};
+
+	vibrator0:vibrator@0 {
+		compatible = "mediatek,vibrator";
+		vib_timer = <25>;
+		vib_limit = <9>;
+		vib_vol= <5>;
+	};
 };
 
 // clock-frequency must be specified for each CPU. If it is omitted, MediaTek's
