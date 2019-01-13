@@ -40,7 +40,9 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/kthread.h>
+#if defined CONFIG_HAS_WAKELOCKS
 #include <linux/wakelock.h>
+#endif
 #include <linux/delay.h>
 #include <linux/syscalls.h>
 #include <linux/time.h>
@@ -58,7 +60,7 @@
 #include <mt-plat/upmu_common.h>
 #include "pmic.h"
 /*#include <mach/eint.h> TBD*/
-#include <mach/mt_pmic_wrap.h>
+#include <mach/mtk_pmic_wrap.h>
 #include <mt-plat/mtk_rtc.h>
 #include <mach/mt_spm_mtcmos.h>
 
@@ -74,9 +76,9 @@
 #include <mt-plat/battery_common.h>
 #include <mach/mt_battery_meter.h>
 #endif
-#include "mt6311.h"
-#include <mach/mt_pmic.h>
-#include <mt-plat/mt_reboot.h>
+//#include "mt6311.h"
+#include <mach/mtk_pmic.h>
+#include <mt-plat/mtk_reboot.h>
 
 /*****************************************************************************
  * Global variable

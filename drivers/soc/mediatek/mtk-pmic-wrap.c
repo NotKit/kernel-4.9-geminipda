@@ -11,6 +11,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+
+#define DEBUG 1
+
 #include <linux/clk.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
@@ -1241,7 +1244,7 @@ static int pwrap_read16(struct pmic_wrapper *wrp, u32 adr, u32 *rdata)
 	return 0;
 }
 
-int pwrap_read_hal(struct pmic_wrapper *wrp, u32 adr, u32 *rdata)
+int pwrap_read_hal(u32 adr, u32 *rdata)
 {
 	return wrp->slave->pwrap_read(wrp, adr, rdata);
 }
@@ -1266,7 +1269,7 @@ static int pwrap_write16(struct pmic_wrapper *wrp, u32 adr, u32 wdata)
 	return 0;
 }
 
-int pwrap_write_hal(struct pmic_wrapper *wrp, u32 adr, u32 wdata)
+int pwrap_write_hal(u32 adr, u32 wdata)
 {
 	return wrp->slave->pwrap_write(wrp, adr, wdata);
 }

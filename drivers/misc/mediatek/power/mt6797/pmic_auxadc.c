@@ -22,7 +22,9 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/kthread.h>
+#if defined CONFIG_HAS_WAKELOCKS
 #include <linux/wakelock.h>
+#endif
 #include <linux/device.h>
 #include <linux/kdev_t.h>
 #include <linux/fs.h>
@@ -40,7 +42,7 @@
 #include <mt-plat/upmu_common.h>
 #include <mach/upmu_sw.h>
 /*#include <mach/eint.h> TBD*/
-#include <mach/mt_pmic_wrap.h>
+#include <mach/mtk_pmic_wrap.h>
 #if defined CONFIG_MTK_LEGACY
 #include <mt-plat/mt_gpio.h>
 #endif
@@ -54,8 +56,8 @@
 #include <linux/time.h>
 /*#include <mach/pmic_mt6328_sw.h>*/
 
-#include <mach/mt_pmic.h>
-#include <mach/mt_battery_meter.h>
+#include <mach/mtk_pmic.h>
+//#include <mach/mt_battery_meter.h>
 
 
 /*
@@ -79,7 +81,7 @@
 #endif
 
 signed int count_time_out = 15;
-struct wake_lock pmicAuxadc_irq_lock;
+struct wakeup_source pmicAuxadc_irq_lock;
 /*static DEFINE_SPINLOCK(pmic_adc_lock);*/
 static DEFINE_MUTEX(pmic_adc_mutex);
 static DEFINE_MUTEX(auxadc_ch3_mutex);
@@ -89,7 +91,7 @@ void pmic_auxadc_init(void)
 	int ret;
 
 	/*signed int adc_busy;*/
-	wake_lock_init(&pmicAuxadc_irq_lock, WAKE_LOCK_SUSPEND, "pmicAuxadc irq wakelock");
+	wakeup_source_init(&pmicAuxadc_irq_lock, "pmicAuxadc irq wakelock");
 
 	pmic_set_register_value(PMIC_AUXADC_AVG_NUM_LARGE, 6);	/* 1.3ms */
 	pmic_set_register_value(PMIC_AUXADC_AVG_NUM_SMALL, 2);	/* 0.8ms */
@@ -114,14 +116,14 @@ void unlockadcch3(void)
 
 void pmic_auxadc_lock(void)
 {
-	wake_lock(&pmicAuxadc_irq_lock);
+	__pm_stay_awake(&pmicAuxadc_irq_lock);
 	mutex_lock(&pmic_adc_mutex);
 }
 
 void pmic_auxadc_unlock(void)
 {
 	mutex_unlock(&pmic_adc_mutex);
-	wake_unlock(&pmicAuxadc_irq_lock);
+	__pm_relax(&pmicAuxadc_irq_lock);
 }
 
 void pmic_auxadc_debug(int index)
@@ -173,7 +175,7 @@ signed int PMIC_IMM_GetCurrent(void)
 	pmic_set_register_value(PMIC_RG_AUXADC_CK_PDN, 0);
 	pmic_set_register_value(PMIC_RG_AUXADC_SMPS_CK_PDN_HWEN, 0);
 */
-	wake_lock(&pmicAuxadc_irq_lock);
+	__pm_stay_awake(&pmicAuxadc_irq_lock);
 	mutex_lock(&pmic_adc_mutex);
 	ret = pmic_config_interface(MT6351_AUXADC_RQST0_SET, 0x3, 0xffff, 0);
 
@@ -218,7 +220,7 @@ signed int PMIC_IMM_GetCurrent(void)
 #endif
 
 	mutex_unlock(&pmic_adc_mutex);
-	wake_unlock(&pmicAuxadc_irq_lock);
+	__pm_relax(&pmicAuxadc_irq_lock);
 	/*
 	pmic_set_register_value(PMIC_RG_AUXADC_SMPS_CK_PDN, 0x1);
 	*/
@@ -232,7 +234,7 @@ signed int PMIC_IMM_GetCurrent(void)
 /*
  * PMIC-AUXADC
  */
-unsigned int PMIC_IMM_GetOneChannelValue(pmic_adc_ch_list_enum dwChannel, int deCount, int trimd)
+int PMIC_IMM_GetOneChannelValue(unsigned int dwChannel, int deCount, int trimd)
 {
 	signed int ret = 0;
 	signed int ret_data;
@@ -286,7 +288,7 @@ unsigned int PMIC_IMM_GetOneChannelValue(pmic_adc_ch_list_enum dwChannel, int de
 	pmic_set_register_value(PMIC_STRUP_AUXADC_RSTB_SEL, 1);
 	/* END only used for PMIC_DVT */
 #endif
-	wake_lock(&pmicAuxadc_irq_lock);
+	__pm_stay_awake(&pmicAuxadc_irq_lock);
 	mutex_lock(&pmic_adc_mutex);
 
 	if (dwChannel == 3)
@@ -478,7 +480,7 @@ unsigned int PMIC_IMM_GetOneChannelValue(pmic_adc_ch_list_enum dwChannel, int de
 	default:
 		PMICLOG2("[AUXADC] Invalid channel value(%d,%d)\n", dwChannel, trimd);
 		mutex_unlock(&pmic_adc_mutex);
-		wake_unlock(&pmicAuxadc_irq_lock);
+		__pm_relax(&pmicAuxadc_irq_lock);
 		return -1;
 		break;
 	}
@@ -578,14 +580,14 @@ unsigned int PMIC_IMM_GetOneChannelValue(pmic_adc_ch_list_enum dwChannel, int de
 	default:
 		PMICLOG2("[AUXADC] Invalid channel value(%d,%d)\n", dwChannel, trimd);
 		mutex_unlock(&pmic_adc_mutex);
-		wake_unlock(&pmicAuxadc_irq_lock);
+		__pm_relax(&pmicAuxadc_irq_lock);
 		return -1;
 		break;
 	}
 	PMICLOG2("[AUXADC] ch:%d(%x, %x, %x, %x)\n", dwChannel, adc_result,
 		ret_data, g_pmic_pad_vbif28_vol, pmic_get_register_value(PMIC_BATON_TDET_EN));
 	mutex_unlock(&pmic_adc_mutex);
-	wake_unlock(&pmicAuxadc_irq_lock);
+	__pm_relax(&pmicAuxadc_irq_lock);
 	/*
 	pmic_set_register_value(PMIC_RG_AUXADC_SMPS_CK_PDN, 0x1);
 	*/
@@ -616,12 +618,12 @@ unsigned int PMIC_IMM_GetOneChannelValueMD(unsigned char dwChannel, int deCount,
 		return -1;
 
 
-	wake_lock(&pmicAuxadc_irq_lock);
+	__pm_stay_awake(&pmicAuxadc_irq_lock);
 	mutex_lock(&pmic_adc_mutex);
 	ret = pmic_config_interface(MT6351_TOP_CLKSQ_SET, (1 << 3), 0xffff, 0);
 	ret = pmic_config_interface(MT6351_AUXADC_RQST1_SET, (1 << dwChannel), 0xffff, 0);
 	mutex_unlock(&pmic_adc_mutex);
-	wake_unlock(&pmicAuxadc_irq_lock);
+	__pm_relax(&pmicAuxadc_irq_lock);
 	udelay(10);
 
 	switch (dwChannel) {
@@ -689,7 +691,7 @@ unsigned int PMIC_IMM_GetOneChannelValueMD(unsigned char dwChannel, int deCount,
 
 	default:
 		PMICLOG2("[AUXADC] Invalid channel value(%d,%d)\n", dwChannel, trimd);
-		wake_unlock(&pmicAuxadc_irq_lock);
+		__pm_relax(&pmicAuxadc_irq_lock);
 		return -1;
 		break;
 	}
@@ -717,12 +719,12 @@ unsigned int PMIC_IMM_GetOneChannelValueMD(unsigned char dwChannel, int deCount,
 		break;
 	default:
 		PMICLOG2("[AUXADC] Invalid channel value(%d,%d)\n", dwChannel, trimd);
-		wake_unlock(&pmicAuxadc_irq_lock);
+		__pm_relax(&pmicAuxadc_irq_lock);
 		return -1;
 		break;
 	}
 
-	wake_unlock(&pmicAuxadc_irq_lock);
+	__pm_relax(&pmicAuxadc_irq_lock);
 
 	PMICLOG2("[AUXADC] PMIC_IMM_GetOneChannelValueMD ch=%d raw=%d data=%d\n", dwChannel,
 		ret_data, adc_result);

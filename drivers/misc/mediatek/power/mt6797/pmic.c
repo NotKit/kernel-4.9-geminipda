@@ -42,13 +42,9 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/kthread.h>
-/*
-#if !defined CONFIG_HAS_WAKELOCKS
-#include <linux/pm_wakeup.h>  included in linux/device.h
-#else
-*/
+#if defined CONFIG_HAS_WAKELOCKS
 #include <linux/wakelock.h>
-/*#endif*/
+#endif
 #include <linux/device.h>
 #include <linux/kdev_t.h>
 #include <linux/fs.h>
@@ -78,7 +74,7 @@
 #include "pmic.h"
 #include "pmic_irq.h"
 /*#include <mach/eint.h> TBD*/
-#include <mach/mt_pmic_wrap.h>
+#include <mach/mtk_pmic_wrap.h>
 #if defined CONFIG_MTK_LEGACY
 #include <mt-plat/mt_gpio.h>
 #endif
@@ -102,9 +98,9 @@
 #include <mach/mt_battery_meter.h>
 #endif
 /* #include "mt6311.h" */
-#include <mach/mt_pmic.h>
-#include <mt-plat/mt_reboot.h>
-#include <mach/mt_charging.h>
+#include <mach/mtk_pmic.h>
+#include <mt-plat/mtk_reboot.h>
+//#include <mach/mt_charging.h>
 
 #if defined(EXTERNAL_BUCK_FAN49101)
 #include "fan49101.h"
@@ -164,6 +160,9 @@ static DEFINE_MUTEX(pmic_access_mutex);
 /*--- Global suspend state ---*/
 static bool pmic_suspend_state;
 static bool pmic_pre_wdt_reset_state;
+
+extern int pwrap_read_hal(u32 adr, u32 *rdata);
+extern int pwrap_write_hal(u32 adr, u32 wdata);
 
 int pmic_force_vcore_pwm(bool enable)
 {
@@ -302,7 +301,7 @@ unsigned int pmic_read_interface(unsigned int RegNum, unsigned int *val, unsigne
 	mutex_lock(&pmic_access_mutex);
 
 	/*mt_read_byte(RegNum, &pmic_reg);*/
-	return_value = pwrap_wacs2(0, (RegNum), 0, &rdata);
+	return_value = pwrap_read_hal((RegNum), &rdata);
 	pmic_reg = rdata;
 	if (return_value != 0) {
 		PMICLOG("[pmic_read_interface] Reg[%x]= pmic_wrap read data fail\n", RegNum);
@@ -331,7 +330,7 @@ unsigned int pmic_buck_vsleep_to_swctrl(unsigned int buck_num, unsigned int vsle
 	unsigned int pmic_reg = 0;
 	unsigned int rdata;
 
-	return_value = pwrap_wacs2(0, (vsleep_addr), 0, &rdata);
+	return_value = pwrap_read_hal((vsleep_addr), &rdata);
 	pmic_reg = rdata;
 	mtk_bucks[buck_num].vsleep_en_saved = rdata;
 	if (en_buck_vsleep_dbg == 1) {
@@ -341,10 +340,10 @@ unsigned int pmic_buck_vsleep_to_swctrl(unsigned int buck_num, unsigned int vsle
 	pmic_reg &= ~(vsleep_mask << vsleep_shift);
 	pmic_reg |= (0 << vsleep_shift);
 
-	return_value = pwrap_wacs2(1, (vsleep_addr), pmic_reg, &rdata);
+	return_value = pwrap_write_hal((vsleep_addr), pmic_reg);
 	if (en_buck_vsleep_dbg == 1) {
 		udelay(1000);
-		return_value = pwrap_wacs2(0, (vsleep_addr), 0, &rdata);
+		return_value = pwrap_read_hal((vsleep_addr), &rdata);
 		pr_err("[pmic]vsleep.b %s_vsleep[0x%x]=0x%x, 0x%x\n", mtk_bucks[buck_num].desc.name,
 			vsleep_addr, mtk_bucks[buck_num].vsleep_en_saved, pmic_reg);
 	}
@@ -362,7 +361,7 @@ unsigned int pmic_buck_vsleep_restore(unsigned int buck_num, unsigned int vsleep
 			mtk_bucks[buck_num].vsleep_en_saved |= 0x13;
 		pmic_reg &= ~(vsleep_mask << vsleep_shift);
 		pmic_reg |= (mtk_bucks[buck_num].vsleep_en_saved);
-		return_value = pwrap_wacs2(1, (vsleep_addr), pmic_reg, &rdata);
+		return_value = pwrap_write_hal((vsleep_addr), pmic_reg);
 		if (en_buck_vsleep_dbg == 1) {
 			pr_err("[pmic]restore %s_vsleep[0x%x]=0x%x, 0x%x\n", mtk_bucks[buck_num].desc.name,
 			vsleep_addr, mtk_bucks[buck_num].vsleep_en_saved, rdata);
@@ -529,7 +528,7 @@ unsigned int pmic_config_interface(unsigned int RegNum, unsigned int val, unsign
 	mutex_lock(&pmic_access_mutex);
 
 	/*1. mt_read_byte(RegNum, &pmic_reg);*/
-	return_value = pwrap_wacs2(0, (RegNum), 0, &rdata);
+	return_value = pwrap_read_hal((RegNum), &rdata);
 	pmic_reg = rdata;
 	if (return_value != 0) {
 		PMICLOG("[pmic_config_interface] Reg[%x]= pmic_wrap read data fail\n", RegNum);
@@ -543,7 +542,7 @@ unsigned int pmic_config_interface(unsigned int RegNum, unsigned int val, unsign
 
 	/*2. mt_write_byte(RegNum, pmic_reg);*/
 	pmic_config_interface_buck_vsleep_check(RegNum, val, MASK, SHIFT);
-	return_value = pwrap_wacs2(1, (RegNum), pmic_reg, &rdata);
+	return_value = pwrap_write_hal((RegNum), pmic_reg);
 	if (return_value != 0) {
 		PMICLOG("[pmic_config_interface] Reg[%x]= pmic_wrap read data fail\n", RegNum);
 		mutex_unlock(&pmic_access_mutex);
@@ -554,7 +553,7 @@ unsigned int pmic_config_interface(unsigned int RegNum, unsigned int val, unsign
 #if 0
 	/*3. Double Check*/
 	/*mt_read_byte(RegNum, &pmic_reg);*/
-	return_value = pwrap_wacs2(0, (RegNum), 0, &rdata);
+	return_value = pwrap_read_hal((RegNum), &rdata);
 	pmic_reg = rdata;
 	if (return_value != 0) {
 		PMICLOG("[pmic_config_interface] Reg[%x]= pmic_wrap write data fail\n", RegNum);
@@ -582,7 +581,7 @@ unsigned int pmic_read_interface_nolock(unsigned int RegNum, unsigned int *val, 
 
 
 	/*mt_read_byte(RegNum, &pmic_reg); */
-	return_value = pwrap_wacs2(0, (RegNum), 0, &rdata);
+	return_value = pwrap_read_hal((RegNum), &rdata);
 	pmic_reg = rdata;
 	if (return_value != 0) {
 		PMICLOG("[pmic_read_interface] Reg[%x]= pmic_wrap read data fail\n", RegNum);
@@ -613,7 +612,7 @@ unsigned int pmic_config_interface_nolock(unsigned int RegNum, unsigned int val,
     /* pmic wrapper has spinlock protection. pmic do not to do it again */
 
 	/*1. mt_read_byte(RegNum, &pmic_reg); */
-	return_value = pwrap_wacs2(0, (RegNum), 0, &rdata);
+	return_value = pwrap_read_hal((RegNum), &rdata);
 	pmic_reg = rdata;
 	if (return_value != 0) {
 		PMICLOG("[pmic_config_interface] Reg[%x]= pmic_wrap read data fail\n", RegNum);
@@ -627,7 +626,7 @@ unsigned int pmic_config_interface_nolock(unsigned int RegNum, unsigned int val,
 
 	/*2. mt_write_byte(RegNum, pmic_reg); */
 	pmic_config_interface_buck_vsleep_check(RegNum, val, MASK, SHIFT);
-	return_value = pwrap_wacs2(1, (RegNum), pmic_reg, &rdata);
+	return_value = pwrap_write_hal((RegNum), pmic_reg);
 	if (return_value != 0) {
 		PMICLOG("[pmic_config_interface] Reg[%x]= pmic_wrap read data fail\n", RegNum);
 		mutex_unlock(&pmic_access_mutex);
@@ -638,7 +637,7 @@ unsigned int pmic_config_interface_nolock(unsigned int RegNum, unsigned int val,
 #if 0
 	/*3. Double Check */
 	/*mt_read_byte(RegNum, &pmic_reg); */
-	return_value = pwrap_wacs2(0, (RegNum), 0, &rdata);
+	return_value = pwrap_read_hal((RegNum), &rdata);
 	pmic_reg = rdata;
 	if (return_value != 0) {
 		PMICLOG("[pmic_config_interface] Reg[%x]= pmic_wrap write data fail\n", RegNum);
@@ -3748,12 +3747,12 @@ int is_ext_buck_exist(void)
 {
 #if defined(EXTERNAL_BUCK_MT6311)
 	if ((is_mt6311_exist() == 1))
+        return 1;
 #elif defined(EXTERNAL_BUCK_DA9214)
 	if ((is_da9214_exist() == 1))
+        return 1;
 #endif
-		return 1;
-	else
-		return 0;
+	return 0;
 }
 
 int is_ext_buck2_exist(void)
