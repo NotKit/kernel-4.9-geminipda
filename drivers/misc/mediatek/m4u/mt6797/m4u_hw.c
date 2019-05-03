@@ -1080,6 +1080,7 @@ static int _m4u_config_port(int port, int virt, int sec, int dis, int dir)
 		larb_port = m4u_port_2_larb_port(port);
 		larb_base = gLarbBaseAddr[larb];
 		m4uHw_set_field_by_mask(larb_base, SMI_LARB_NON_SEC_CONx(larb_port), F_SMI_MMU_EN, !!(virt));
+		m4uHw_set_field_by_mask(larb_base, SMI_LARB_SEC_CONx(larb_port), F_SMI_SEC_EN, !!(sec));
 
 		/* debug use */
 		mmu_en = m4uHw_get_field_by_mask(larb_base, SMI_LARB_NON_SEC_CONx(larb_port), 0x1);
@@ -1571,6 +1572,9 @@ void m4u_print_port_status(struct seq_file *seq, int only_print_active)
 			mmu_en =
 				m4uHw_get_field_by_mask(larb_base, SMI_LARB_NON_SEC_CONx(larb_port),
 							F_SMI_NON_SEC_MMU_EN(1));
+			sec =
+				m4uHw_get_field_by_mask(larb_base, SMI_LARB_SEC_CONx(larb_port),
+							F_SMI_SEC_EN(larb_port, 1));
 
 		} else {
 			larb_port = m4u_port_2_larb_port(port);
@@ -1853,7 +1857,7 @@ irqreturn_t MTK_M4U_isr(int irq, void *dev_id)
 			M4UMSG("fault: layer=%d, wr=%d, REG_MMU_INIT=0x%x\n",
 			       layer, write, regval);
 
-			if (m4u_port == M4U_PORT_DISP_OVL0) {
+			if (m4u_port == M4U_PORT_DISP_OVL0 || m4u_port == M4U_PORT_DISP_OVL1) {
 				unsigned int valid_mva = 0;
 				unsigned int valid_size = 0;
 				unsigned int valid_mva_end = 0;
@@ -2005,6 +2009,12 @@ int m4u_reg_init(m4u_domain_t *m4u_domain, unsigned long ProtectPA, int m4u_id)
 
 			M4UINFO("init larb %d, 0x%lx\n", i, gLarbBaseAddr[i]);
 		}
+		
+		node = of_find_compatible_node(NULL, NULL, "mediatek,infracfg_ao");
+		InfraConfigBaseAddr = (unsigned long)of_iomap(node, 0);
+		m4uHw_set_field_by_mask(InfraConfigBaseAddr, 0x70C, F_BIT_SET(9), F_BIT_SET(9));
+		regval = M4U_ReadReg32(InfraConfigBaseAddr, 0x70C);
+		M4UMSG("InfraConfig: enable mmu_idle 0x%x\n", regval);
 	}
 	/* ========================================= */
 	/* perisys init */
@@ -2048,9 +2058,13 @@ int m4u_reg_init(m4u_domain_t *m4u_domain, unsigned long ProtectPA, int m4u_id)
 		m4u_enable_intr(m4u_id);
 
 		/* set translation fault proctection buffer address */
-
-		M4U_WriteReg32(gM4UBaseAddr[m4u_id], REG_MMU_IVRP_PADDR,
-			       (unsigned int)F_MMU_IVRP_PA_SET(ProtectPA));
+		if (!gM4U_4G_DRAM_Mode) {
+			M4U_WriteReg32(gM4UBaseAddr[m4u_id], REG_MMU_IVRP_PADDR,
+				       (unsigned int)F_MMU_IVRP_PA_SET(ProtectPA));
+		} else {
+			M4U_WriteReg32(gM4UBaseAddr[m4u_id], REG_MMU_IVRP_PADDR,
+				       (unsigned int)F_MMU_IVRP_4G_DRAM_PA_SET(ProtectPA));
+		}
 
 		/* enable DCM */
 		M4U_WriteReg32(gM4UBaseAddr[m4u_id], REG_MMU_DCM_DIS, 0);
@@ -2166,10 +2180,16 @@ int m4u_hw_init(struct m4u_device *m4u_dev, int m4u_id)
 		port.ePortID = M4U_PORT_MDP_RDMA0;
 		m4u_config_port(&port);
 
-		port.ePortID = M4U_PORT_MDP_WROT0;
+		port.ePortID = M4U_PORT_MDP_WDMA0;
 		m4u_config_port(&port);
 
 		port.ePortID = M4U_PORT_MDP_WROT0;
+		m4u_config_port(&port);
+
+		port.ePortID = M4U_PORT_MDP_RDMA1;
+		m4u_config_port(&port);
+
+		port.ePortID = M4U_PORT_MDP_WROT1;
 		m4u_config_port(&port);
 
 	}
