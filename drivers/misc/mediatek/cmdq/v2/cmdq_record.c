@@ -16,7 +16,7 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #ifndef EARLY_PORTING_MIGRATION
-#include <mt-plat/mt_lpae.h>
+#include <mt-plat/mtk_lpae.h>
 #endif
 
 #include "cmdq_core.h"

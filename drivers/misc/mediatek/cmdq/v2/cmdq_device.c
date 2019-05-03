@@ -33,7 +33,7 @@
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
 #ifndef EARLY_PORTING_MIGRATION
-#include <mt-plat/mt_lpae.h>
+#include <mt-plat/mtk_lpae.h>
 #endif
 
 struct CmdqDeviceStruct {

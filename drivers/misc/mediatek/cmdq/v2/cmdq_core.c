@@ -11,8 +11,8 @@
  * GNU General Public License for more details.
  */
 #ifndef EARLY_PORTING_MIGRATION
-#define CMDQ_MDP_MET_STATUS
-#define CMDQ_MET_READY
+//#define CMDQ_MDP_MET_STATUS
+//#define CMDQ_MET_READY
 #endif
 
 #include "cmdq_core.h"
@@ -52,7 +52,7 @@
 #include <mach/mt_reg_base.h>
 #endif
 #ifndef EARLY_PORTING_MIGRATION
-#include <mt-plat/mt_lpae.h>
+#include <mt-plat/mtk_lpae.h>
 #endif
 
 /* #define CMDQ_PROFILE_COMMAND_TRIGGER_LOOP */
@@ -2016,7 +2016,7 @@ static int32_t cmdq_core_task_alloc_single_buffer_list(
 #ifndef EARLY_PORTING_MIGRATION
 	buffer_entry->pVABase = cmdq_core_alloc_hw_buffer(
 		cmdq_dev_get(), CMDQ_CMD_BUFFER_SIZE, &buffer_entry->MVABase,
-		GFP_KERNEL | __GFP_NO_KSWAPD);
+		GFP_KERNEL);
 #else
 	buffer_entry->pVABase =
 		cmdq_core_alloc_hw_buffer(cmdq_dev_get(), CMDQ_CMD_BUFFER_SIZE,

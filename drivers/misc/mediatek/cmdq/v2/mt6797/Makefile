@@ -11,17 +11,17 @@
 # GNU General Public License for more details.
 #
 
-# common driver code for CMDQ
-ifeq ($(CONFIG_MTK_CMDQ_TAB), y)
-  obj-y += v2/
-else
-  ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6797"))
-    obj-y += v2/
-  else
-    # use common driver
-    obj-y += v3/
-  endif
+# drivers/cmdq
+
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/cmdq/v2 \
+             -I$(srctree)/drivers/misc/mediatek/m4u/$(MTK_PLATFORM)
+
+# Enable MET
+ccflags-y += -DMET_USER_EVENT_SUPPORT
+
+# Common Clock Framework
+ifneq ($(CONFIG_MTK_CLKMGR),y)
+ccflags-y += -DCMDQ_USE_CCF
 endif
-# mdp_sw_sync
-obj-y += mdp_sync/
-# EOF
+
+obj-y += cmdq_mdp.o
