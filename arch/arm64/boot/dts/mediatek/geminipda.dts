@@ -453,11 +453,6 @@
 			reg = <0x10002800 0x400>;
 		};
 
-		pericfg@10003000 {
-			compatible = "mediatek,pericfg";
-			reg = <0x10003000 0x1000>;
-		};
-
 		gpio@10005000 {
 			compatible = "mediatek,gpio";
 			reg = <0x10005000 0x1000>;
