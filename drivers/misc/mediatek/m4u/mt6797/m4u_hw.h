@@ -33,16 +33,13 @@
 #define M4U_SEQ_ALIGN_SIZE  0x100000
 
 /* mau related */
-#define MAU_NR_PER_M4U_SLAVE    1
+#define MAU_NR_PER_M4U_SLAVE    4
 
 /* smi */
-#ifdef CONFIG_MACH_MT6765
-#define SMI_LARB_NR     4
-#elif defined(CONFIG_MACH_MT6761)
-#define SMI_LARB_NR     3
-#endif
+#define SMI_LARB_NR     7
+
 /* prog pfh dist related */
-#define PROG_PFH_DIST    2
+#define PROG_PFH_DIST    16
 
 #define M4U0_PROG_PFH_NR         (PROG_PFH_DIST)
 #define M4U1_PROG_PFH_NR         (PROG_PFH_DIST)

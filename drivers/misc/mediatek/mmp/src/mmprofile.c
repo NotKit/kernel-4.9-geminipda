@@ -61,7 +61,7 @@
 #define MMPROFILE_DEFAULT_META_BUFFER_SIZE 0x800000
 static unsigned int mmprofile_meta_datacookie = 1;
 #else
-#define MMPROFILE_DEFAULT_META_BUFFER_SIZE 0x0
+#define MMPROFILE_DEFAULT_META_BUFFER_SIZE 0x400000
 #endif
 
 #define MMPROFILE_DUMP_BLOCK_SIZE (1024*4)

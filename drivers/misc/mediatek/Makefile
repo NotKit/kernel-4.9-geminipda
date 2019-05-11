@@ -92,7 +92,7 @@ endif
 # obj-$(CONFIG_MTK_GZ_KREE) += geniezone/
 # obj-$(CONFIG_MTK_DEVMPU) += devmpu/
 # obj-y += sspm/
-# obj-$(CONFIG_MMPROFILE) += mmp/
+obj-$(CONFIG_MMPROFILE) += mmp/
 obj-$(CONFIG_MTK_M4U)	+= m4u/
 # obj-$(CONFIG_MTK_PSEUDO_M4U)   += pseudo_m4u/
 # obj-$(CONFIG_MTK_SMI_EXT)	+= smi/

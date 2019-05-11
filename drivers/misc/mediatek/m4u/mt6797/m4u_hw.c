@@ -1079,15 +1079,19 @@ static int _m4u_config_port(int port, int virt, int sec, int dis, int dir)
 		larb = m4u_port_2_larbid(port);
 		larb_port = m4u_port_2_larb_port(port);
 		larb_base = gLarbBaseAddr[larb];
-		m4uHw_set_field_by_mask(larb_base, SMI_LARB_NON_SEC_CONx(larb_port), F_SMI_MMU_EN, !!(virt));
-		m4uHw_set_field_by_mask(larb_base, SMI_LARB_SEC_CONx(larb_port), F_SMI_SEC_EN, !!(sec));
+		m4uHw_set_field_by_mask(larb_base, SMI_LARB_MMU_EN,
+					F_SMI_MMU_EN(larb_port, 1), F_SMI_MMU_EN(larb_port,
+										 !!(virt)));
+		m4uHw_set_field_by_mask(larb_base, SMI_LARB_SEC_EN,
+					F_SMI_SEC_EN(larb_port, 1), F_SMI_SEC_EN(larb_port,
+										 !!(sec)));
 
 		/* debug use */
-		mmu_en = m4uHw_get_field_by_mask(larb_base, SMI_LARB_NON_SEC_CONx(larb_port), 0x1);
+		mmu_en = m4uHw_get_field_by_mask(larb_base, SMI_LARB_MMU_EN, F_SMI_MMU_EN(larb_port, 1));
 		if (!!(mmu_en) != virt) {
 			M4ULOG_HIGH("m4u_config_port error, port=%s, Virtuality=%d, mmu_en=%x (%x, %x)\n",
 				m4u_get_port_name(port), virt, mmu_en,
-				M4U_ReadReg32(larb_base, SMI_LARB_NON_SEC_CONx(larb_port)), F_SMI_MMU_EN);
+				M4U_ReadReg32(larb_base, SMI_LARB_MMU_EN), F_SMI_MMU_EN(larb_port, 1));
 		}
 	} else {
 		larb_port = m4u_port_2_larb_port(port);
@@ -1190,13 +1194,12 @@ int m4u_config_port_array(struct m4u_port_array *port_array)
 {
 	int port, larb, larb_port;
 	int ret = 0;
-	int m4u_index;
 
 	unsigned int config_larb[SMI_LARB_NR] = { 0 };
-	unsigned int regNew[SMI_LARB_NR][32] = { {0} };
-#ifdef M4U_TEE_SERVICE_ENABLE
+	unsigned int regOri[SMI_LARB_NR] = { 0 };
+	unsigned int regNew[SMI_LARB_NR] = { 0 };
+	unsigned int change = 0;
 	unsigned char m4u_port_array[(M4U_PORT_NR + 1) / 2] = { 0 };
-#endif
 
 	for (port = 0; port < M4U_PORT_NR; port++) {
 		if (port_array->ports[port] && M4U_PORT_ATTR_EN != 0) {
@@ -1205,9 +1208,9 @@ int m4u_config_port_array(struct m4u_port_array *port_array)
 			larb = m4u_port_2_larbid(port);
 			larb_port = m4u_port_2_larb_port(port);
 			config_larb[larb] |= (1 << larb_port);
-			regNew[larb][larb_port] = value =
-				!!port_array->ports[port] &&
-				!!M4U_PORT_ATTR_VIRTUAL;
+			value =
+				(!!(port_array->ports[port] && M4U_PORT_ATTR_VIRTUAL)) << larb_port;
+			regNew[larb] = (regNew[larb] & (~(1 << larb_port))) | value;
 
 #ifdef M4U_TEE_SERVICE_ENABLE
 			{
@@ -1219,49 +1222,41 @@ int m4u_config_port_array(struct m4u_port_array *port_array)
 					m4u_port_array[port / 2] |= attr;
 			}
 #endif
+			M4ULOG_LOW("m4u_config_port_array 0, 0x%x, 0x%x, 0x%x, port_array: 0x%x\n",
+				   port_array->ports[port], value, regNew[larb],
+				   m4u_port_array[port / 2]);
 		}
 	}
 
 	/* enable larb clock */
-	for (larb = 0; larb < SMI_LARB_NR; larb++)
-		if (config_larb[larb] != 0)
+	for (larb = 0; larb < SMI_LARB_NR; larb++) {
+		if (config_larb[larb] != 0) {
 			_m4u_port_clock_toggle(0, larb, 1);
-
 #ifdef M4U_TEE_SERVICE_ENABLE
-	if (m4u_tee_en) {
-		m4u_config_port_array_tee(m4u_port_array);
-		for (larb = 0; larb < SMI_LARB_NR; larb++) {
-			if (config_larb[larb] != 0)
-				_m4u_port_clock_toggle(0, larb, 0);
-		}
-		return ret;
-	}
+			if (m4u_tee_en)
+				change = 1;
+			else
 #endif
+			{
+				regOri[larb] = M4U_ReadReg32(gLarbBaseAddr[larb], SMI_LARB_MMU_EN);
+				M4ULOG_LOW
+				("m4u_config_port_array 2 larb: %d ori reg: 0x%x, new reg: 0x%x\n",
+				 larb, regOri[larb], regNew[larb]);
+				if (regOri[larb] != regNew[larb])
+					change = 1;
 
-	/* config port */
-	for (port = 0; port < gM4u_port_num; port++) {
-		if ((port_array->ports[port] && M4U_PORT_ATTR_EN) == 0)
-			continue;
-
-		m4u_index = m4u_port_2_m4u_id(port);
-		if (m4u_index == 0) {
-			unsigned int orig_value;
-
-			larb = m4u_port_2_larbid(port);
-			larb_port = m4u_port_2_larb_port(port);
-
-			orig_value =
-				m4uHw_get_field_by_mask(gLarbBaseAddr[larb], SMI_LARB_NON_SEC_CONx(larb_port),
-							F_SMI_NON_SEC_MMU_EN(1));
-
-				if (orig_value != regNew[larb][larb_port]) {
-					spin_lock(&gM4u_reg_lock);
-				m4uHw_set_field_by_mask(gLarbBaseAddr[larb], SMI_LARB_NON_SEC_CONx(larb_port),
-							F_SMI_MMU_EN,
-							F_SMI_NON_SEC_MMU_EN(!!(regNew[larb][larb_port])));
-					spin_unlock(&gM4u_reg_lock);
 			}
+		}
+	}
 
+	for (larb = 0; larb < SMI_LARB_NR; larb++) {
+		if (config_larb[larb] != 0 && change == 1) {
+			M4ULOG_MID("m4u_config_port_array larb: %d ori reg: 0x%x, new reg: 0x%x\n",
+				   larb, regOri[larb], regNew[larb]);
+			spin_lock(&gM4u_reg_lock);
+			m4uHw_set_field_by_mask(gLarbBaseAddr[larb], SMI_LARB_MMU_EN,
+						config_larb[larb], regNew[larb]);
+			spin_unlock(&gM4u_reg_lock);
 		}
 	}
 
@@ -1473,12 +1468,12 @@ int m4u_reg_restore(void)
 	return 0;
 }
 
-static unsigned int larb_reg_backup_buf[SMI_LARB_NR][64];
+//static unsigned int larb_reg_backup_buf[SMI_LARB_NR][64];
 
 static void larb_backup(unsigned int larb_idx)
 {
 	unsigned long larb_base;
-	unsigned int i;
+	//unsigned int i;
 
 	if (larb_idx >= SMI_LARB_NR) {
 		M4UMSG("error: %s larb_idx = %d\n", __func__, larb_idx);
@@ -1493,18 +1488,20 @@ static void larb_backup(unsigned int larb_idx)
 
 #endif
 	{
+        /*
 		for (i = 0; i < 32; i++)
 			__M4U_BACKUP(larb_base, SMI_LARB_NON_SEC_CONx(i), larb_reg_backup_buf[larb_idx][i]);
 
 		for (i = 0; i < 32; i++)
 			__M4U_BACKUP(larb_base, SMI_LARB_SEC_CONx(i), larb_reg_backup_buf[larb_idx][i + 32]);
+		*/
 	}
 }
 
 static void larb_restore(unsigned int larb_idx)
 {
 	unsigned long larb_base;
-	unsigned int i;
+	//unsigned int i;
 
 	if (larb_idx >= SMI_LARB_NR) {
 		M4UMSG("error: %s larb_idx = %d\n", __func__, larb_idx);
@@ -1518,11 +1515,13 @@ static void larb_restore(unsigned int larb_idx)
 	else
 #endif
 	{
+		/*
 		for (i = 0; i < 32; i++)
 			__M4U_RESTORE(larb_base, SMI_LARB_NON_SEC_CONx(i), larb_reg_backup_buf[larb_idx][i]);
 
 		for (i = 0; i < 32; i++)
 			__M4U_RESTORE(larb_base, SMI_LARB_SEC_CONx(i), larb_reg_backup_buf[larb_idx][i + 32]);
+		*/
 	}
 }
 
@@ -1556,7 +1555,7 @@ void m4u_larb0_disable(char *name)
 
 void m4u_print_port_status(struct seq_file *seq, int only_print_active)
 {
-	int port, mmu_en = 0;
+	int port, mmu_en = 0, sec;
 	int m4u_index, larb, larb_port;
 	unsigned long larb_base;
 
@@ -1570,10 +1569,10 @@ void m4u_print_port_status(struct seq_file *seq, int only_print_active)
 			larb_base = gLarbBaseAddr[larb];
 
 			mmu_en =
-				m4uHw_get_field_by_mask(larb_base, SMI_LARB_NON_SEC_CONx(larb_port),
-							F_SMI_NON_SEC_MMU_EN(1));
+				m4uHw_get_field_by_mask(larb_base, SMI_LARB_MMU_EN,
+							F_SMI_MMU_EN(larb_port, 1));
 			sec =
-				m4uHw_get_field_by_mask(larb_base, SMI_LARB_SEC_CONx(larb_port),
+				m4uHw_get_field_by_mask(larb_base, SMI_LARB_SEC_EN,
 							F_SMI_SEC_EN(larb_port, 1));
 
 		} else {
@@ -1612,9 +1611,8 @@ void m4u_print_port_status_ext(struct seq_file *seq, int tf_port)
 	if (m4u_index == 0) {
 		l_port = m4u_port_2_larb_port(tf_port);
 		larb_base = gLarbBaseAddr[larb];
-		mmu_en = m4uHw_get_field_by_mask(larb_base,
-						 SMI_LARB_NON_SEC_CONx(l_port),
-						 F_SMI_NON_SEC_MMU_EN(1));
+		mmu_en = m4uHw_get_field_by_mask(larb_base, SMI_LARB_MMU_EN,
+							F_SMI_MMU_EN(l_port, 1));
 
 	}
 
@@ -1810,6 +1808,7 @@ irqreturn_t MTK_M4U_isr(int irq, void *dev_id)
 		unsigned int fault_mva, fault_pa;
 
 		M4UMSG("m4u main interrupt happened: sta=0x%x\n", IntrSrc);
+		/*
 		for (larb_index = 0; larb_index < SMI_LARB_NR; larb_index++) {
 			M4UMSG("larb%d: NON_SEC_CON:0x%x, SEC_CON:0x%x\n",
 			     larb_index,
@@ -1819,6 +1818,7 @@ irqreturn_t MTK_M4U_isr(int irq, void *dev_id)
 			      SMI_LARB_SEC_CONx(larb_index))
 			);
 		}
+		*/
 		if (IntrSrc & (F_INT_MMU0_MAIN_MSK | F_INT_MMU0_MAU_MSK))
 			m4u_slave_id = 0;
 		else if (IntrSrc & (F_INT_MMU1_MAIN_MSK | F_INT_MMU1_MAU_MSK))
@@ -1963,7 +1963,6 @@ int m4u_reg_init(m4u_domain_t *m4u_domain, unsigned long ProtectPA, int m4u_id)
 {
 	unsigned int regval;
 	int i;
-	int j;
 
 	M4UMSG("m4u_reg_init, ProtectPA = 0x%lx\n", ProtectPA);
 
@@ -1984,6 +1983,7 @@ int m4u_reg_init(m4u_domain_t *m4u_domain, unsigned long ProtectPA, int m4u_id)
 	/* ========================================= */
 	if (m4u_id == 0) {
 		struct device_node *node = NULL;
+		unsigned long InfraConfigBaseAddr;
 
 		for (i = 0; i < SMI_LARB_NR; i++) {
 			node = of_find_compatible_node(NULL, NULL, gM4U_SMILARB[i]);
@@ -1995,21 +1995,18 @@ int m4u_reg_init(m4u_domain_t *m4u_domain, unsigned long ProtectPA, int m4u_id)
 			larb_clock_on(i, 1);
 #ifndef CONFIG_FPGA_EARLY_PORTING
 			M4UMSG("m4u write all port domain to 4\n");
-			for (j = 0; j < 32; j++) {
-				if (gLarbBaseAddr[i] == 0)
-					continue;
-
-				m4uHw_set_field_by_mask(gLarbBaseAddr[i], SMI_LARB_SEC_CONx(j),
-									F_SMI_DOMN(0x7), F_SMI_DOMN(0x4));
+			if (gLarbBaseAddr[i] != 0) {
+				M4U_WriteReg32(gLarbBaseAddr[i], SMI_LARB_DOMN_0, 0x44444444);
+				M4U_WriteReg32(gLarbBaseAddr[i], SMI_LARB_DOMN_1, 0x44444444);
+				M4U_WriteReg32(gLarbBaseAddr[i], SMI_LARB_DOMN_2, 0x44444444);
+				M4U_WriteReg32(gLarbBaseAddr[i], SMI_LARB_DOMN_3, 0x44444444);
 			}
-#else
-			j = 0;
 #endif
 			larb_clock_off(i, 1);
 
 			M4UINFO("init larb %d, 0x%lx\n", i, gLarbBaseAddr[i]);
 		}
-		
+
 		node = of_find_compatible_node(NULL, NULL, "mediatek,infracfg_ao");
 		InfraConfigBaseAddr = (unsigned long)of_iomap(node, 0);
 		m4uHw_set_field_by_mask(InfraConfigBaseAddr, 0x70C, F_BIT_SET(9), F_BIT_SET(9));
@@ -2083,8 +2080,7 @@ int m4u_reg_init(m4u_domain_t *m4u_domain, unsigned long ProtectPA, int m4u_id)
 		/* 3 non-standard AXI mode */
 		M4U_WriteReg32(m4u_base, REG_MMU_STANDARD_AXI_MODE, 0);
 		/* 4 write command throttling mode */
-		m4uHw_set_field_by_mask(m4u_base, REG_MMU_WR_LEN, F_MMU_WR_THROT_DIS(3), F_MMU_WR_THROT_DIS(0));
-		m4uHw_set_field_by_mask(m4u_base, REG_MMU_DUMMY, F_REG_MMU_IDLE_ENABLE, 0);
+		m4uHw_set_field_by_mask(m4u_base, REG_MMU_WR_LEN, F_BIT_SET(5), 0);
 	}
 
 	return 0;
